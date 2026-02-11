@@ -126,6 +126,7 @@ Reward sharing based on distance ranking:
 ## Available Metrics
 
 ### For Comparison Plots
+Compare multiple experiments on the same plot:
 ```python
 compare_experiments(
     results,
@@ -140,6 +141,20 @@ compare_experiments(
     ]
 )
 ```
+
+### For Individual Experiment Details
+Plot detailed time-series for a single experiment:
+```python
+plot_experiment_details(result, save_plots=True)
+```
+
+This creates a comprehensive 6-panel plot showing:
+- **Region Selection**: Stacked area showing which regions proposers choose per slot
+- **Source Selection**: Stacked area showing which sources proposers choose per slot
+- **Proposer Distribution**: Stacked area showing where ALL proposers reside over time
+- **Gini Over Time**: Inequality metrics for proposer distribution, region selection, and source selection
+- **Entropy Over Time**: Diversity metrics for proposer distribution, region selection, and source selection
+- **Reward Over Time**: Average reward per proposer evolution
 
 ### Statistics Available
 ```python

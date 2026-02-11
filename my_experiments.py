@@ -9,7 +9,8 @@ from experiment_runner import (
     ExperimentConfig,
     run_experiment,
     compare_experiments,
-    print_comparison_table
+    print_comparison_table,
+    plot_experiment_details
 )
 
 
@@ -90,9 +91,9 @@ def define_experiments():
         seed=42
     ))
 
-    # Experiment 4: High migration cost
+    # Experiment 4: High exploration UCB
     experiments.append(ExperimentConfig(
-        name="high_migration_cost",
+        name="ucb_high_exploration",
         n_regions=5,
         region_names=["West", "CentralWest", "Central", "CentralEast", "East"],
         sources_config=[
@@ -100,11 +101,8 @@ def define_experiments():
             ("MedValue", 12.0, 2),
             ("HighValue", 18.0, 4)
         ],
-        policy_type="EMA",
-        eta=0.12,
-        beta_reg=1.5,
-        beta_src=2.5,
-        cost_c=1.0,  # Higher migration cost
+        policy_type="UCB",
+        alpha=3.5,  # Higher exploration (vs 2.0 baseline)
         n_proposers=80,
         K=8,
         n_slots=10000,
@@ -151,6 +149,12 @@ def main():
         metrics=['proposer_dist_gini', 'proposer_dist_entropy', 'reward'],
         save_plots=True
     )
+
+    # Plot individual experiment details
+    print("\n\nGenerating detailed plots for each experiment...")
+    for result in results:
+        print(f"\nPlotting details for: {result.config.name}")
+        plot_experiment_details(result, save_plots=True)
 
     print("\n" + "="*70)
     print("All experiments complete!")

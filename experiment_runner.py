@@ -499,6 +499,169 @@ def compare_experiments(results: List[ExperimentResult],
     plt.show()
 
 
+def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
+    """
+    Plot detailed time-series for a single experiment.
+
+    Creates separate plots for:
+    - Region selection over time (stacked area or line plot)
+    - Source selection over time
+    - Proposer distribution over time
+    - Diversity metrics (Gini, Entropy)
+    - Rewards
+
+    Args:
+        result: ExperimentResult object
+        save_plots: Whether to save plots to disk
+    """
+    if not HAS_MATPLOTLIB:
+        print("Matplotlib not available. Cannot create plots.")
+        return
+
+    print(f"\n[DEBUG] Plotting details for experiment: {result.config.name}")
+
+    # Create figure with multiple subplots
+    fig = plt.figure(figsize=(16, 12))
+
+    # Define grid: 3 rows, 2 columns
+    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+
+    slots = np.arange(len(result.region_counts))
+
+    # Get dimensions
+    n_regions = result.config.n_regions
+    n_sources = len(result.config.sources_config)
+
+    # 1. Region Selection Over Time (stacked area)
+    ax1 = fig.add_subplot(gs[0, 0])
+    region_counts_T = result.region_counts.T  # Transpose for stacking
+    colors_regions = plt.cm.tab10(np.linspace(0, 1, n_regions))
+
+    ax1.stackplot(slots, *region_counts_T,
+                  labels=[result.config.region_names[i] for i in range(n_regions)],
+                  colors=colors_regions, alpha=0.7)
+    ax1.set_xlabel('Slot', fontsize=10)
+    ax1.set_ylabel('Number of Proposers', fontsize=10)
+    ax1.set_title('Region Selection Per Slot', fontsize=11, fontweight='bold')
+    ax1.legend(loc='upper right', fontsize=8, framealpha=0.9)
+    ax1.grid(True, alpha=0.3)
+
+    # 2. Source Selection Over Time (stacked area)
+    ax2 = fig.add_subplot(gs[0, 1])
+    source_counts_T = result.source_counts.T
+
+    # Get source names from config
+    source_names = [f"{src[0]} (V={src[1]})" for src in result.config.sources_config]
+    colors_sources = plt.cm.Set2(np.linspace(0, 1, n_sources))
+
+    ax2.stackplot(slots, *source_counts_T,
+                  labels=source_names,
+                  colors=colors_sources, alpha=0.7)
+    ax2.set_xlabel('Slot', fontsize=10)
+    ax2.set_ylabel('Number of Proposers', fontsize=10)
+    ax2.set_title('Source Selection Per Slot', fontsize=11, fontweight='bold')
+    ax2.legend(loc='upper right', fontsize=8, framealpha=0.9)
+    ax2.grid(True, alpha=0.3)
+
+    # 3. Proposer Distribution Over Time (stacked area)
+    ax3 = fig.add_subplot(gs[1, 0])
+    proposer_dist_T = result.proposer_distribution.T
+
+    ax3.stackplot(slots, *proposer_dist_T,
+                  labels=[result.config.region_names[i] for i in range(n_regions)],
+                  colors=colors_regions, alpha=0.7)
+    ax3.set_xlabel('Slot', fontsize=10)
+    ax3.set_ylabel('Number of Proposers', fontsize=10)
+    ax3.set_title('Proposer Distribution (All Proposers)', fontsize=11, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=8, framealpha=0.9)
+    ax3.grid(True, alpha=0.3)
+
+    # 4. Diversity Metrics - Gini
+    ax4 = fig.add_subplot(gs[1, 1])
+
+    # Smooth data
+    window = min(100, len(result.proposer_dist_gini_over_time) // 10)
+    if window > 1:
+        smooth_prop_gini = np.convolve(result.proposer_dist_gini_over_time,
+                                       np.ones(window)/window, mode='valid')
+        smooth_region_gini = np.convolve(result.region_gini_over_time,
+                                         np.ones(window)/window, mode='valid')
+        smooth_source_gini = np.convolve(result.source_gini_over_time,
+                                         np.ones(window)/window, mode='valid')
+        slots_smooth = np.arange(window-1, len(slots))
+    else:
+        smooth_prop_gini = result.proposer_dist_gini_over_time
+        smooth_region_gini = result.region_gini_over_time
+        smooth_source_gini = result.source_gini_over_time
+        slots_smooth = slots
+
+    ax4.plot(slots_smooth, smooth_prop_gini, label='Proposer Distribution', linewidth=2, alpha=0.8)
+    ax4.plot(slots_smooth, smooth_region_gini, label='Region Selection', linewidth=2, alpha=0.8)
+    ax4.plot(slots_smooth, smooth_source_gini, label='Source Selection', linewidth=2, alpha=0.8)
+    ax4.set_xlabel('Slot', fontsize=10)
+    ax4.set_ylabel('Gini Coefficient', fontsize=10)
+    ax4.set_title('Gini (Inequality) Over Time', fontsize=11, fontweight='bold')
+    ax4.legend(loc='best', fontsize=9, framealpha=0.9)
+    ax4.grid(True, alpha=0.3)
+
+    # 5. Diversity Metrics - Entropy
+    ax5 = fig.add_subplot(gs[2, 0])
+
+    if window > 1:
+        smooth_prop_ent = np.convolve(result.proposer_dist_entropy_over_time,
+                                      np.ones(window)/window, mode='valid')
+        smooth_region_ent = np.convolve(result.region_entropy_over_time,
+                                        np.ones(window)/window, mode='valid')
+        smooth_source_ent = np.convolve(result.source_entropy_over_time,
+                                        np.ones(window)/window, mode='valid')
+    else:
+        smooth_prop_ent = result.proposer_dist_entropy_over_time
+        smooth_region_ent = result.region_entropy_over_time
+        smooth_source_ent = result.source_entropy_over_time
+
+    ax5.plot(slots_smooth, smooth_prop_ent, label='Proposer Distribution', linewidth=2, alpha=0.8)
+    ax5.plot(slots_smooth, smooth_region_ent, label='Region Selection', linewidth=2, alpha=0.8)
+    ax5.plot(slots_smooth, smooth_source_ent, label='Source Selection', linewidth=2, alpha=0.8)
+    ax5.set_xlabel('Slot', fontsize=10)
+    ax5.set_ylabel('Normalized Entropy', fontsize=10)
+    ax5.set_title('Entropy (Diversity) Over Time', fontsize=11, fontweight='bold')
+    ax5.legend(loc='best', fontsize=9, framealpha=0.9)
+    ax5.grid(True, alpha=0.3)
+
+    # 6. Average Reward Over Time
+    ax6 = fig.add_subplot(gs[2, 1])
+
+    if window > 1:
+        smooth_rewards = np.convolve(result.rewards, np.ones(window)/window, mode='valid')
+    else:
+        smooth_rewards = result.rewards
+
+    ax6.plot(slots_smooth, smooth_rewards, linewidth=2, color='darkgreen', alpha=0.8)
+    ax6.set_xlabel('Slot', fontsize=10)
+    ax6.set_ylabel('Average Reward', fontsize=10)
+    ax6.set_title('Average Reward Per Proposer', fontsize=11, fontweight='bold')
+    ax6.grid(True, alpha=0.3)
+
+    # Main title
+    policy_info = result.config.policy_type
+    if result.config.policy_type == "EMA":
+        policy_info += f" (η={result.config.eta}, β_reg={result.config.beta_reg}, β_src={result.config.beta_src}, c={result.config.cost_c})"
+    else:
+        policy_info += f" (α={result.config.alpha})"
+
+    fig.suptitle(f'Experiment: {result.config.name} | {policy_info}',
+                 fontsize=13, fontweight='bold')
+
+    if save_plots:
+        results_dir = Path(result.config.results_dir)
+        results_dir.mkdir(exist_ok=True)
+        filename = results_dir / f"{result.config.name}_details.png"
+        plt.savefig(filename, dpi=150, bbox_inches='tight')
+        print(f"Detail plot saved to: {filename}")
+
+    plt.show()
+
+
 def print_comparison_table(results: List[ExperimentResult]):
     """Print a comparison table of final metrics."""
     print(f"\n{'='*120}")

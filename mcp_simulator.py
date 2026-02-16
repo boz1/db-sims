@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Minimal MCP Simulator inspired by GeoDec
+Decentralized Building Simulator (db-sims) - Core simulation engine
+
+Inspired by GeoDec research, generalized for studying location choice in various
+distributed and decentralized block building regimes.
+
 Implements distance-ranked sharing with two interchangeable learning policies:
   (A) EMA + softmax
   (B) Individual UCB bandit
@@ -177,7 +181,13 @@ class UCBPolicy(LearningPolicy):
 
 class MCPSimulator:
     """
-    Minimal MCP simulator with distance-ranked sharing.
+    Core simulator for studying location choice in decentralized block building.
+
+    Implements distance-ranked sharing mechanism to model geographic incentives
+    in various distributed/decentralized building regimes (e.g., multiple concurrent
+    proposers, distributed builder networks, decentralized ordering protocols).
+
+    Note: Class retains 'MCP' name for backward compatibility.
     """
 
     def __init__(self,

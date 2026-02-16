@@ -1,14 +1,16 @@
-# MCP Simulator - Geographic Decentralization Model
+# Decentralized Building Simulator (db-sims)
 
-A simulator for studying geographic decentralization in multiple-concurrent proposer systems.
+A simulator for studying location choice incentives in distributed and decentralized block building regimes.
 
 ## Overview
 
-This simulator models proposers (agents) that:
+This simulator models block builders (agents) that:
 - Choose regions (geographic locations) and information sources
 - Learn optimal strategies through reinforcement learning (EMA-Softmax or UCB)
 - Receive rewards based on distance-ranked sharing with concentration penalties
 - Start from an even distribution and migrate over time
+
+The simulator is designed to study how different block building regimes (e.g., multiple concurrent proposers, distributed building networks, decentralized ordering protocols) affect the geographic distribution of builders and the resulting centralization dynamics.
 
 ## Key Features
 
@@ -113,7 +115,7 @@ Reward sharing based on distance ranking:
 ## File Structure
 
 ### Core Library
-- **`mcp_simulator.py`** - Core simulator with Omega mechanism, policies, and tracking
+- **`mcp_simulator.py`** - Core simulator with Omega mechanism, policies, and tracking (retains original name for compatibility)
 - **`experiment_runner.py`** - Experiment framework with configuration, comparison, and visualization
 
 ### Experiments & Demos
@@ -188,12 +190,14 @@ result.rewards                            # Average reward per slot
 
 ## Example Research Questions
 
-1. **Convergence**: How quickly does proposer distribution reach equilibrium?
+1. **Convergence**: How quickly does builder distribution reach equilibrium?
 2. **Policy comparison**: Does EMA or UCB achieve better rewards/diversity?
 3. **Migration cost effects**: How does `cost_c` affect final distribution?
-4. **Source placement**: How does source location influence equilibrium?
-5. **Exploration vs exploitation**: What's the optimal balance?
+4. **Source placement**: How does information source location influence equilibrium?
+5. **Exploration vs exploitation**: What's the optimal balance for different building regimes?
 6. **Fairness**: Is the final distribution equitable across regions?
+7. **Decentralization trade-offs**: How do different block building protocols affect geographic centralization?
+8. **Network effects**: How does the number of concurrent builders affect location choices?
 
 ## Advanced Usage
 
@@ -303,8 +307,11 @@ pip install numpy matplotlib
 
 ## References
 
+This simulator was inspired by research on geographic decentralization in blockchain systems:
 - GeoDec paper: [arXiv:2509.21475v2](https://arxiv.org/pdf/2509.21475v2)
-- Original repo: [geographical-decentralization-simulation](https://github.com/syang-ng/geographical-decentralization-simulation)
+- Original GeoDec repo: [geographical-decentralization-simulation](https://github.com/syang-ng/geographical-decentralization-simulation)
+
+The simulator has been generalized to study location choice incentives across various distributed and decentralized block building regimes.
 
 ## License
 

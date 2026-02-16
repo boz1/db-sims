@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Experiment Runner: Configurable MCP simulator with comparison tools.
+Experiment Runner: Configurable simulator for studying location choice in decentralized building.
 
 This script provides:
 1. Centralized configuration for all experiment parameters
 2. Easy-to-run experiments with different settings
 3. Comparison tools to analyze metrics over time across experiments
+
+Supports various distributed/decentralized block building regimes.
 """
 
 import numpy as np

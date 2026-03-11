@@ -52,32 +52,42 @@ def load_gcp(
 
 def gcp_sources(
     region_names: List[str],
-    source_regions: List[str],
+    source_regions: list,
     lambda_rate: float = 5.0,
     mu_val: float = 1.0,
     sigma_val: float = 0.5,
 ) -> List[tuple]:
     """
-    Build a sources_config list for ExperimentConfig from named GCP regions
+    Build a sources_config list for ExperimentConfig from named GCP regions.
+
+    Each entry in source_regions can either be a region name (uses the shared
+    defaults) or a dict with a region key and optional overrides for
+    lambda_rate, mu_val, sigma_val for each source
 
     Args:
         region_names: full ordered list returned by load_gcp()
-        source_regions: GCP region IDs where sources are located
-        lambda_rate: txs per second per source
-        mu_val: lognormal mean of tx value
-        sigma_val: lognormal std of tx value
+        source_regions: list of region names or dicts for each source
+        lambda_rate: default txs per second per source
+        mu_val: default lognormal mean of tx value
+        sigma_val: default lognormal std of tx value
 
     Returns:
         sources_config list of (name, region_idx, lambda_rate, mu_val, sigma_val)
     """
     index = {r: i for i, r in enumerate(region_names)}
-    missing = [region for region in source_regions if region not in index]
-    if missing:
-        raise ValueError(f"Source regions not found in dataset: {missing}")
-    return [
-        (region, index[region], lambda_rate, mu_val, sigma_val)
-        for region in source_regions
-    ]
+    result = []
+    for entry in source_regions:
+        if isinstance(entry, dict):
+            region = entry["region"]
+            lr = entry.get("lambda_rate", lambda_rate)
+            mu = entry.get("mu_val", mu_val)
+            sig = entry.get("sigma_val", sigma_val)
+        else:
+            region, lr, mu, sig = entry, lambda_rate, mu_val, sigma_val
+        if region not in index:
+            raise ValueError(f"Source region not found in dataset: {region!r}")
+        result.append((region, index[region], lr, mu, sig))
+    return result
 
 
 def subregion(

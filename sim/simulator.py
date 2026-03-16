@@ -320,20 +320,14 @@ class LocationGamesSimulator:
         tx_emitted_counter = 0
         tx_received_counter = 0
 
-        # Group builders by their selected region so that we only compute propagation once per region per source
-        region_to_builders: Dict[int, List[int]] = defaultdict(list)
-        for builder in self.builders:
-            region_to_builders[builder_selected_regions[builder.id]].append(builder.id)
-
         for source in self.sources:
             txs = self.tx_generator.generate(source, self.delta)
 
             for tx in txs:
-                # Sample propagation once per region so that all colocated builders share the same outcome
-                receivers = []
-                for region_id, builder_ids in region_to_builders.items():
-                    if self.propagation_model.receives(region_id, source.id, tx, self.delta):
-                        receivers.extend(builder_ids)
+                receivers = [builder.id for builder in self.builders if 
+                            self.propagation_model.receives(
+                            builder_selected_regions[builder.id],
+                            source.id, tx, self.delta)]
                 if receivers:
                     tx_receivers[tx_received_counter] = receivers
                     tx_values[tx_received_counter] = tx.value

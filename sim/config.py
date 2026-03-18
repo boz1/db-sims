@@ -32,6 +32,9 @@ class ExperimentConfig:
     latency_mean: Optional[np.ndarray] = None
     latency_std: Optional[np.ndarray] = None
 
+    # Propagation model: "lognormal" for stochastic (GCP), "fixed" for deterministic (synthetic)
+    propagation_model_type: str = "lognormal"
+
     # Policy configuration
     policy_type: str = "EMA"  # "EMA" or "UCB"
 
@@ -95,9 +98,24 @@ def load_config(path) -> ExperimentConfig:
     elif dataset_type == "synthetic":
         region_names = ds["region_names"]
         n = len(region_names)
-        dist = np.array([[abs(r - s) for s in range(n)] for r in range(n)], dtype=float)
-        latency_mean = 0.1 + 0.05 * dist
-        latency_std  = 0.05 + 0.02 * dist
+        topology = ds.get("latency_topology", "linear")
+        if topology == "linear":
+            dist = np.array([[abs(r - s) for s in range(n)] for r in range(n)], dtype=float)
+        elif topology == "flat":
+            # All off-diagonal pairs have the same distance (fully symmetric)
+            dist = np.ones((n, n), dtype=float)
+            np.fill_diagonal(dist, 0.0)
+        elif topology == "zero":
+            # Instant propagation everywhere
+            dist = np.zeros((n, n), dtype=float)
+        else:
+            raise ValueError(f"Unknown latency_topology: {topology!r}. Use 'linear', 'flat', or 'zero'.")
+        latency_mean_base = ds.get("latency_mean_base", 0.1)
+        latency_mean_scale = ds.get("latency_mean_scale", 0.05)
+        latency_std_base = ds.get("latency_std_base", 0.05)
+        latency_std_scale = ds.get("latency_std_scale", 0.02)
+        latency_mean = latency_mean_base + latency_mean_scale * dist
+        latency_std  = latency_std_base  + latency_std_scale  * dist
         sources_config = [
             (f"Src_{name}", i, ds.get("lambda_rate", 5.0),
              ds.get("mu_val", 1.0), ds.get("sigma_val", 0.5))
@@ -106,6 +124,8 @@ def load_config(path) -> ExperimentConfig:
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type!r}")
 
+    propagation_model_type = "fixed" if dataset_type == "synthetic" else "lognormal"
+
     return ExperimentConfig(
         name=raw["name"],
         n_regions=len(region_names),
@@ -113,6 +133,7 @@ def load_config(path) -> ExperimentConfig:
         sources_config=sources_config,
         latency_mean=latency_mean,
         latency_std=latency_std,
+        propagation_model_type=propagation_model_type,
         n_builders=sim["n_builders"],
         n_slots=sim["n_slots"],
         delta=sim.get("delta", 12.0),

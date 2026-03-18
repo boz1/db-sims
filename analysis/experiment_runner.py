@@ -8,7 +8,7 @@ from analysis.poa import compute_poa_stats
 from sim.simulator import (
     Region, Source, Builder, LocationGamesSimulator,
     EMASoftmaxPolicy, UCBPolicy, StochasticTransactionGenerator,
-    LatencyPropagationModel, EqualSplitSharingRule,
+    LatencyPropagationModel, FixedLatencyPropagationModel, EqualSplitSharingRule,
 )
 
 def get_preset_config(preset_name: str) -> ExperimentConfig:
@@ -106,7 +106,11 @@ def _run_single(config: ExperimentConfig, seed: int,
         sources=sources,
         builders=builders,
         tx_generator=StochasticTransactionGenerator(),
-        propagation_model=LatencyPropagationModel(latency_mean, latency_std),
+        propagation_model=(
+            FixedLatencyPropagationModel(latency_mean)
+            if config.propagation_model_type == "fixed"
+            else LatencyPropagationModel(latency_mean, latency_std)
+        ),
         sharing_rule=EqualSplitSharingRule(),
         delta=config.delta,
         seed=seed,

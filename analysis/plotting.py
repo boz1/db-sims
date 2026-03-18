@@ -151,7 +151,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     fig = plt.figure(figsize=(20, 18))
 
     # Define grid: 4 rows, 3 columns (row 3 reserved for welfare spanning full width)
-    gs = fig.add_gridspec(4, 3, hspace=0.35, wspace=0.3)
+    gs = fig.add_gridspec(4, 3, hspace=0.55, wspace=0.3)
 
     slots = np.arange(len(result.region_counts))
 
@@ -183,7 +183,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     ax1.set_xlabel('Slot', fontsize=10)
     ax1.set_ylabel('Number of builders', fontsize=10)
     ax1.set_title('Region Selection Per Slot', fontsize=11, fontweight='bold')
-    ax1.legend(loc='upper right', fontsize=8, framealpha=0.9)
+    ax1.legend(loc='upper center', bbox_to_anchor=(0.5, -0.18), ncol=5, fontsize=7, framealpha=0.9)
     ax1.grid(True, alpha=0.3)
 
     # 2. Transactions per Round + Coverage Ratio

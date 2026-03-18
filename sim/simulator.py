@@ -188,6 +188,17 @@ class LatencyPropagationModel(PropagationModel):
         d = np.random.lognormal(self._mu_ln[region_id, source_id], self._sigma_ln[region_id, source_id])
         return tx.emission_time + d <= delta
 
+class FixedLatencyPropagationModel(PropagationModel):
+    """
+    Deterministic propagation: a transaction is received iff emission_time + latency <= delta.
+    Use for synthetic experiments to eliminate stochastic propagation noise.
+    """
+    def __init__(self, latency_mean: np.ndarray):
+        self.latency_mean = latency_mean
+
+    def receives(self, region_id: int, source_id: int, tx: Transaction, delta: float) -> bool:
+        return tx.emission_time + self.latency_mean[region_id, source_id] <= delta
+
 
 @dataclass
 class Builder:

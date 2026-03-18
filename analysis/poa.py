@@ -2,11 +2,24 @@ import numpy as np
 from scipy.special import log_ndtr
 from itertools import combinations_with_replacement
 
-from sim.simulator import LatencyPropagationModel
+from sim.simulator import LatencyPropagationModel, FixedLatencyPropagationModel, PropagationModel
 from sim.config import ExperimentConfig, create_scenario_from_config
 from analysis.result import ExperimentResult
 
 def _compute_welfare_analytical(
+    profile: list,
+    sources,
+    propagation_model: PropagationModel,
+    delta: float,
+    n_time_steps: int = 200,
+) -> float:
+    """Compute E[W(s)] analytically. Uses the correct method based on propagation model type."""
+    if isinstance(propagation_model, FixedLatencyPropagationModel):
+        return _compute_welfare_fixed(profile, sources, propagation_model, delta)
+    return _compute_welfare_lognormal(profile, sources, propagation_model, delta, n_time_steps)
+
+
+def _compute_welfare_lognormal(
     profile: list,
     sources,
     propagation_model: LatencyPropagationModel,
@@ -41,6 +54,37 @@ def _compute_welfare_analytical(
     return welfare
 
 
+def _compute_welfare_fixed(
+    profile: list,
+    sources,
+    propagation_model: FixedLatencyPropagationModel,
+    delta: float,
+) -> float:
+    """Analytical welfare for deterministic fixed-latency propagation
+    """
+    active_regions = set(profile)
+
+    welfare = 0.0
+    for s_idx, source in enumerate(sources):
+        ev = np.exp(source.mu_val + source.sigma_val ** 2 / 2)
+        # Coverage fraction for each region in profile (others contribute 0)
+        # # P(covered by at least one region) = 1 - prod(1 - coverage_r) but coverage_r is 0 or 1 here
+        # so it simplifies: covered iff any region r in profile has latency <= delta - t
+        min_latency = min(
+            propagation_model.latency_mean[r, s_idx] for r in active_regions
+        )
+        coverage_fraction = max(0.0, delta - min_latency) / delta
+        welfare += source.lambda_rate * delta * ev * coverage_fraction
+
+    return welfare
+
+
+def _make_prop_model(config: ExperimentConfig, latency_mean, latency_std) -> PropagationModel:
+    if config.propagation_model_type == "fixed":
+        return FixedLatencyPropagationModel(latency_mean)
+    return LatencyPropagationModel(latency_mean, latency_std)
+
+
 def compute_optimal_welfare_brute_force(
     config: ExperimentConfig,
     n_time_steps: int = 200,
@@ -48,7 +92,7 @@ def compute_optimal_welfare_brute_force(
     """Exact optimal welfare via exhaustive search over all builder multisets.
     Scales as C(R+K-1, K) evaluations. Feasible for small R or K"""
     _, sources, latency_mean, latency_std = create_scenario_from_config(config)
-    prop_model = LatencyPropagationModel(latency_mean, latency_std)
+    prop_model = _make_prop_model(config, latency_mean, latency_std)
 
     best_welfare, best_profile = -np.inf, None
     for profile in combinations_with_replacement(range(config.n_regions), config.n_builders):
@@ -66,7 +110,7 @@ def compute_optimal_welfare_greedy(
     """(1-1/e)-approximate optimal welfare via greedy + analytical welfare.
     Runs K*R evaluations."""
     _, sources, latency_mean, latency_std = create_scenario_from_config(config)
-    prop_model = LatencyPropagationModel(latency_mean, latency_std)
+    prop_model = _make_prop_model(config, latency_mean, latency_std)
 
     profile = []
     for _ in range(config.n_builders):

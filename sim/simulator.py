@@ -12,6 +12,7 @@ Implements two interchangeable learning policies:
 from collections import defaultdict
 
 import numpy as np
+from scipy.stats import norm
 from typing import List, Dict
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -172,6 +173,11 @@ class PropagationModel(ABC):
         """Determine if a builder in region_id receives transaction tx from source_id within delta."""
         pass
 
+    @abstractmethod
+    def reception_prob(self, region_id: int, source_id: int, remaining_time: float) -> float:
+        """Return P(latency <= remaining_time) for a builder in region_id from source_id."""
+        pass
+
 class LatencyPropagationModel(PropagationModel):
     """
     Accepts raw empirical latency_mean and latency_std (in seconds) and converts
@@ -188,6 +194,16 @@ class LatencyPropagationModel(PropagationModel):
         d = np.random.lognormal(self._mu_ln[region_id, source_id], self._sigma_ln[region_id, source_id])
         return tx.emission_time + d <= delta
 
+    def reception_prob(self, region_id: int, source_id: int, remaining_time: float) -> float:
+        if remaining_time <= 0.0:
+            return 0.0
+        mu = self._mu_ln[region_id, source_id]
+        sigma = self._sigma_ln[region_id, source_id]
+        if sigma < 1e-10:
+            return 1.0 if remaining_time >= np.exp(mu) else 0.0
+        return float(norm.cdf((np.log(remaining_time) - mu) / sigma))
+
+
 class FixedLatencyPropagationModel(PropagationModel):
     """
     Deterministic propagation: a transaction is received iff emission_time + latency <= delta.
@@ -198,6 +214,9 @@ class FixedLatencyPropagationModel(PropagationModel):
 
     def receives(self, region_id: int, source_id: int, tx: Transaction, delta: float) -> bool:
         return tx.emission_time + self.latency_mean[region_id, source_id] <= delta
+
+    def reception_prob(self, region_id: int, source_id: int, remaining_time: float) -> float:
+        return 1.0 if self.latency_mean[region_id, source_id] <= remaining_time else 0.0
 
 
 @dataclass
@@ -249,6 +268,72 @@ class StochasticTransactionGenerator(TransactionGenerator):
 
         return [Transaction(source_id=source.id, emission_time=emission_times[i], value=values[i])
                 for i in range(n)]
+
+
+def precompute_sharing_weights(
+    other_regions: List[int],
+    sources: List[Source],
+    propagation_model: PropagationModel,
+    delta: float,
+    n_t: int = 200,
+) -> np.ndarray:
+    """
+    Precompute E[1 / (1+X_{I,t})] for each (source, time point).
+    X_{I,t} is the number of static builders that receive a tx from source I emitted at time t.
+    """
+    t_points = np.linspace(0, delta, n_t, endpoint=False)
+    remaining = delta - t_points
+    n_other = len(other_regions)
+    weights = np.zeros((len(sources), n_t))
+
+    for i, source in enumerate(sources):
+        # Reception probabilities: probs[b, n] = P(static builder b receives tx at time t_n)
+        probs = np.zeros((n_other, n_t))
+        for builder, region in enumerate(other_regions):
+            for n, rem in enumerate(remaining):
+                probs[builder, n] = propagation_model.reception_prob(region, source.id, rem)
+
+        for n in range(n_t):
+            # Poisson Binomial dynamic programming approach
+            # we build PMF of X = count of static builders receiving the tx
+            pmf = np.array([1.0])
+            for builder in range(n_other):
+                prob = probs[builder, n]
+                new_pmf = np.zeros(len(pmf)+1)
+                new_pmf[:-1] += pmf * (1.0 - prob)
+                new_pmf[1:] += pmf * prob
+                pmf = new_pmf
+            total_builders = np.array(range(1, len(pmf) + 1))
+            weights[i, n] = float(np.sum(pmf / total_builders))
+
+    return weights
+
+
+def compute_expected_reward(
+    candidate_region: int,
+    sharing_weights: np.ndarray,
+    sources: List[Source],
+    propagation_model: PropagationModel,
+    delta: float,
+    n_t: int = 100,
+) -> float:
+    """
+    Compute analytical expected reward for a builder at candidate_region,
+    given precomputed sharing weights from static builders.
+    """
+    remaining = delta - np.linspace(0, delta, n_t, endpoint=False)
+    total = 0.0
+    for i, source in enumerate(sources):
+        ev = np.exp(source.mu_val + 0.5 * source.sigma_val ** 2)
+        q = np.array([
+            propagation_model.reception_prob(candidate_region, source.id, rem)
+            for rem in remaining
+        ])
+        # numerical integration: delta * mean approximates integral_{0->delta} q(t) * w(t) dt
+        # => (1/n_t) * sum_n q(t_n) * w(t_n)
+        integral = float(np.mean(q * sharing_weights[i]))
+        total += source.lambda_rate * ev * delta * integral
+    return total
 
 
 class LocationGamesSimulator:
@@ -365,7 +450,7 @@ class LocationGamesSimulator:
         self.welfare_history.append(float(sum(slot_rewards)))
         self.builder_distribution_history.append(self._get_builder_distribution())
         self.region_reward_pairs_history.append([
-            (builder_selected_regions[b.id], rewards.get(b.id, 0.0)) for b in self.builders
+            (builder_selected_regions[builder.id], rewards.get(builder.id, 0.0)) for builder in self.builders
         ])
         self.tx_emitted_history.append(tx_emitted_counter)
         self.tx_received_history.append(tx_received_counter)
@@ -375,6 +460,44 @@ class LocationGamesSimulator:
         """Run simulation for n_slots."""
         for _ in range(n_slots):
             self.run_round()
+
+    def run_round_abr(self, round_index: int, n_t: int):
+        """
+        One round of asynchronous better response dynamics.
+        A single builder is selected by round robin. It evaluates all regions
+        analytically and migrates to the first one (in random order) that strictly
+        improves its expected reward. All builders then compete from their current
+        locations and rewards are recorded.
+        """
+        active = self.builders[round_index % self.n_builders]
+        other_regions = [builder.current_region for builder in self.builders if builder.id != active.id]
+
+        sharing_weights = precompute_sharing_weights(
+            other_regions, self.sources, self.propagation_model, self.delta, n_t
+        )
+        u_current = compute_expected_reward(
+            active.current_region, sharing_weights, self.sources,
+            self.propagation_model, self.delta, n_t
+        )
+
+        candidates = [region for region in range(self.n_regions) if region != active.current_region]
+        np.random.shuffle(candidates)
+        for region in candidates:
+            u_r = compute_expected_reward(
+                region, sharing_weights, self.sources, self.propagation_model, self.delta, n_t
+            )
+            if u_r > u_current:
+                # Builder migrates to the first strictly better region found (no cost for now)
+                active.set_region(region)
+                break
+
+        # Simulate the round at current locations and record history
+        self.run_round()
+
+    def run_abr(self, n_slots: int, n_t: int = 100):
+        """Run asynchronous better response dynamics for n_slots rounds."""
+        for i in range(n_slots):
+            self.run_round_abr(i, n_t)
 
     def get_statistics(self) -> Dict:
         """Compute summary statistics."""

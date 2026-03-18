@@ -46,6 +46,9 @@ class ExperimentConfig:
     # UCB policy parameters
     alpha: float = 2.0
 
+    # ABR policy parameters
+    n_t: int = 100  # number of time discretisation points for the analytical integral
+
     # Simulation parameters
     n_builders: int = 8
     n_slots: int = 10000
@@ -143,6 +146,7 @@ def load_config(path) -> ExperimentConfig:
         beta_reg=pol.get("beta_reg", 1.5),
         cost_c=pol.get("cost_c", 0.0),
         alpha=pol.get("alpha", 2.0),
+        n_t=pol.get("n_t", 100),
     )
 
 

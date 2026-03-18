@@ -7,7 +7,7 @@ from analysis.result import ExperimentResult
 from analysis.poa import compute_poa_stats
 from sim.simulator import (
     Region, Source, Builder, LocationGamesSimulator,
-    EMASoftmaxPolicy, UCBPolicy, StochasticTransactionGenerator,
+    EMASoftmaxPolicy, UCBPolicy, FixedPolicy, StochasticTransactionGenerator,
     LatencyPropagationModel, FixedLatencyPropagationModel, EqualSplitSharingRule,
 )
 
@@ -97,6 +97,8 @@ def _run_single(config: ExperimentConfig, seed: int,
             )
         elif config.policy_type == "UCB":
             policy = UCBPolicy(config.n_regions, alpha=config.alpha, initial_belief=initial_belief)
+        elif config.policy_type == "ABR":
+            policy = FixedPolicy(config.n_regions)
         else:
             raise ValueError(f"Unknown policy: {config.policy_type}")
         builders.append(Builder(i, policy))
@@ -115,7 +117,10 @@ def _run_single(config: ExperimentConfig, seed: int,
         delta=config.delta,
         seed=seed,
     )
-    sim.run(config.n_slots)
+    if config.policy_type == "ABR":
+        sim.run_abr(config.n_slots, n_t=config.n_t)
+    else:
+        sim.run(config.n_slots)
     result = ExperimentResult(config, sim)
     result.seed = seed
     return result

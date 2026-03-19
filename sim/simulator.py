@@ -353,7 +353,9 @@ class LocationGamesSimulator:
                  propagation_model: PropagationModel,
                  sharing_rule: SharingRule,
                  delta: float,
-                 seed: int = 42):
+                 seed: int = 42,
+                 placement_seed: int = 0,
+                 initial_placement: str = "round_robin"):
         """
         Args:
             regions: List of regions
@@ -363,7 +365,9 @@ class LocationGamesSimulator:
             propagation_model: Propagation model
             sharing_rule: Sharing rule
             delta: Delta parameter
-            seed: Random seed
+            seed: Random seed for dynamics (ABR shuffle, tx draws), changes across runs
+            placement_seed: Random seed for initial builder placement, fixed across runs
+            initial_placement: "round_robin", "random", or "concentrated"
         """
         self.regions = regions
         self.sources = sources
@@ -376,10 +380,12 @@ class LocationGamesSimulator:
         self.n_regions = len(regions)
         self.n_sources = len(sources)
         self.n_builders = len(builders)
+        self.initial_placement = initial_placement
+        self._placement_rng = np.random.default_rng(placement_seed)
 
         np.random.seed(seed)
 
-        # Initialize builders evenly across regions
+        # Initialize builders across regions according to placement strategy
         self._initialize_builder_distribution()
 
         # Tracking
@@ -393,11 +399,20 @@ class LocationGamesSimulator:
 
 
     def _initialize_builder_distribution(self):
-        """Initialize builders evenly across regions."""
+        """Initialize builder locations according to self.initial_placement."""
         for i, builder in enumerate(self.builders):
-            # Distribute evenly: builder i goes to region (i mod n_regions)
-            initial_region = i % self.n_regions
-            builder.set_region(initial_region)
+            if self.initial_placement == "round_robin":
+                # TODO: What we really want is to disperse builders evenly. Once we start using GCP data we should
+                # incorporate latitude/longitude of regions
+                region = i % self.n_regions
+            elif self.initial_placement == "concentrated":
+                region = 0
+            elif self.initial_placement == "random":
+                region = int(self._placement_rng.integers(0, self.n_regions))
+            else:
+                raise ValueError(f"Unknown initial_placement: {self.initial_placement!r}. "
+                                 f"Use 'round_robin', 'concentrated', or 'random'.")
+            builder.set_region(region)
 
     def _get_builder_distribution(self) -> np.ndarray:
         """Get current distribution of all builders across regions."""

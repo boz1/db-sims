@@ -119,11 +119,14 @@ def load_config(path) -> ExperimentConfig:
         latency_std_scale = ds.get("latency_std_scale", 0.02)
         latency_mean = latency_mean_base + latency_mean_scale * dist
         latency_std  = latency_std_base  + latency_std_scale  * dist
+        source_region_indices = ds.get("source_regions", list(range(n)))
         sources_config = [
-            (f"Src_{name}", i, ds.get("lambda_rate", 5.0),
+            (f"Src_{region_names[i]}", i, ds.get("lambda_rate", 5.0),
              ds.get("mu_val", 1.0), ds.get("sigma_val", 0.5))
-            for i, name in enumerate(region_names)
+            for i in source_region_indices
         ]
+        latency_mean = latency_mean[:, source_region_indices]
+        latency_std  = latency_std[:, source_region_indices]
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type!r}")
 

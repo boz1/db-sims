@@ -187,19 +187,10 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     ax1.grid(True, alpha=0.3)
 
     # 2. Transactions per Round + Coverage Ratio
-    ax2 = fig.add_subplot(gs[0, 1])
-    window = min(100, len(result.tx_emitted_history) // 10) if len(result.tx_emitted_history) > 10 else 1
-    if window > 1:
-        smooth_emitted = np.convolve(result.tx_emitted_history, np.ones(window) / window, mode='valid')
-        smooth_received = np.convolve(result.tx_received_history, np.ones(window) / window, mode='valid')
-        slots_txs = np.arange(window - 1, len(result.tx_emitted_history))
-    else:
-        smooth_emitted = result.tx_emitted_history
-        smooth_received = result.tx_received_history
-        slots_txs = np.arange(len(result.tx_emitted_history))
-
-    ax2.plot(slots_txs, smooth_emitted, linewidth=2, color='lightgray', alpha=0.9, label='Emitted')
-    ax2.plot(slots_txs, smooth_received, linewidth=2, color='steelblue', alpha=0.8, label='Received')
+    ax2 = fig.add_subplot(gs[0, 2])
+    slots_txs = np.arange(len(result.tx_emitted_history))
+    ax2.plot(slots_txs, result.tx_emitted_history, linewidth=2, color='lightgray', alpha=0.9, label='Emitted')
+    ax2.plot(slots_txs, result.tx_received_history, linewidth=2, color='steelblue', alpha=0.8, label='Received')
     ax2.set_xlabel('Slot', fontsize=10)
     ax2.set_ylabel('Transactions', fontsize=10)
     ax2.set_title('Transactions per Round', fontsize=11, fontweight='bold')
@@ -208,11 +199,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     ax2_cov = ax2.twinx()
     coverage_series = np.where(result.tx_emitted_history > 0,
                                result.tx_received_history / result.tx_emitted_history, 0.0)
-    if window > 1:
-        smooth_cov = np.convolve(coverage_series, np.ones(window) / window, mode='valid')
-    else:
-        smooth_cov = coverage_series
-    ax2_cov.plot(slots_txs, smooth_cov, linewidth=1.5, color='green', alpha=0.7, linestyle='--', label='Coverage')
+    ax2_cov.plot(slots_txs, coverage_series, linewidth=1.5, color='green', alpha=0.7, linestyle='--', label='Coverage')
     ax2_cov.set_ylabel('Coverage ratio', fontsize=9, color='green')
     ax2_cov.set_ylim(0, 1)
     ax2_cov.tick_params(axis='y', labelcolor='green')
@@ -220,24 +207,27 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
 
     ax2.grid(True, alpha=0.3)
 
+    # 3. Region Occupancy Heatmap (granular view of which regions have builders)
+    ax3 = fig.add_subplot(gs[0, 1])
+    region_counts_matrix = np.array(result.region_counts)  # (n_slots, n_regions)
+    active_mask = region_counts_matrix.max(axis=0) > 0
+    active_indices = np.where(active_mask)[0]
+    active_matrix = region_counts_matrix[:, active_indices].T  # (n_active_regions, n_slots)
+    region_labels = [result.config.region_names[i] for i in active_indices] if result.config.region_names else [str(i) for i in active_indices]
+    im = ax3.imshow(active_matrix, aspect='auto', interpolation='nearest', cmap='YlOrRd',
+                    extent=[0, len(slots), len(active_indices), 0])
+    ax3.set_yticks(np.arange(len(active_indices)) + 0.5)
+    ax3.set_yticklabels(region_labels, fontsize=6)
+    ax3.set_xlabel('Slot', fontsize=10)
+    ax3.set_title('Region Occupancy Heatmap', fontsize=11, fontweight='bold')
+    plt.colorbar(im, ax=ax3, label='Builders', shrink=0.8)
+
     # Row 2: Traditional Metrics
     # 4. Diversity Metrics - Gini
     ax4 = fig.add_subplot(gs[1, 0])
 
-    window = min(100, len(result.builder_dist_gini_over_time) // 10)
-    if window > 1:
-        smooth_prop_gini = np.convolve(result.builder_dist_gini_over_time,
-                                       np.ones(window)/window, mode='valid')
-        smooth_region_gini = np.convolve(result.region_gini_over_time,
-                                         np.ones(window)/window, mode='valid')
-        slots_smooth = np.arange(window-1, len(slots))
-    else:
-        smooth_prop_gini = result.builder_dist_gini_over_time
-        smooth_region_gini = result.region_gini_over_time
-        slots_smooth = slots
-
-    ax4.plot(slots_smooth, smooth_prop_gini, label='Builder Distribution', linewidth=2, alpha=0.8)
-    ax4.plot(slots_smooth, smooth_region_gini, label='Region Selection', linewidth=2, alpha=0.8)
+    slots_smooth = slots
+    ax4.plot(slots_smooth, result.builder_dist_gini_over_time, label='Builder Distribution', linewidth=2, alpha=0.8)
     ax4.set_xlabel('Slot', fontsize=10)
     ax4.set_ylabel('Gini Coefficient', fontsize=10)
     ax4.set_title('Gini (Inequality) Over Time', fontsize=11, fontweight='bold')
@@ -247,17 +237,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 5. Diversity Metrics - Entropy
     ax5 = fig.add_subplot(gs[1, 1])
 
-    if window > 1:
-        smooth_prop_ent = np.convolve(result.builder_dist_entropy_over_time,
-                                      np.ones(window)/window, mode='valid')
-        smooth_region_ent = np.convolve(result.region_entropy_over_time,
-                                        np.ones(window)/window, mode='valid')
-    else:
-        smooth_prop_ent = result.builder_dist_entropy_over_time
-        smooth_region_ent = result.region_entropy_over_time
-
-    ax5.plot(slots_smooth, smooth_prop_ent, label='Builder Distribution', linewidth=2, alpha=0.8)
-    ax5.plot(slots_smooth, smooth_region_ent, label='Region Selection', linewidth=2, alpha=0.8)
+    ax5.plot(slots_smooth, result.builder_dist_entropy_over_time, label='Builder Distribution', linewidth=2, alpha=0.8)
     ax5.set_xlabel('Slot', fontsize=10)
     ax5.set_ylabel('Normalized Entropy', fontsize=10)
     ax5.set_title('Entropy (Diversity) Over Time', fontsize=11, fontweight='bold')
@@ -267,12 +247,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 6. Average Reward Over Time
     ax6 = fig.add_subplot(gs[1, 2])
 
-    if window > 1:
-        smooth_rewards = np.convolve(result.rewards, np.ones(window)/window, mode='valid')
-    else:
-        smooth_rewards = result.rewards
-
-    ax6.plot(slots_smooth, smooth_rewards, linewidth=2, color='darkgreen', alpha=0.8)
+    ax6.plot(slots_smooth, result.rewards, linewidth=2, color='darkgreen', alpha=0.8)
     ax6.set_xlabel('Slot', fontsize=10)
     ax6.set_ylabel('Average Reward', fontsize=10)
     ax6.set_title('Average Reward Per Builder', fontsize=11, fontweight='bold')
@@ -282,17 +257,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 7. HHI Metrics Over Time
     ax7 = fig.add_subplot(gs[2, 0])
 
-    if window > 1:
-        smooth_region_hhi = np.convolve(result.region_hhi_over_time,
-                                        np.ones(window)/window, mode='valid')
-        smooth_prop_hhi = np.convolve(result.builder_dist_hhi_over_time,
-                                      np.ones(window)/window, mode='valid')
-    else:
-        smooth_region_hhi = result.region_hhi_over_time
-        smooth_prop_hhi = result.builder_dist_hhi_over_time
-
-    ax7.plot(slots_smooth, smooth_region_hhi, label='Region Selection', linewidth=2, alpha=0.8)
-    ax7.plot(slots_smooth, smooth_prop_hhi, label='Population Distribution', linewidth=2, alpha=0.8)
+    ax7.plot(slots_smooth, result.builder_dist_hhi_over_time, label='Population Distribution', linewidth=2, alpha=0.8)
     ax7.set_xlabel('Slot', fontsize=10)
     ax7.set_ylabel('HHI', fontsize=10)
     ax7.set_title('HHI (Concentration) Over Time', fontsize=11, fontweight='bold')
@@ -302,21 +267,9 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 8. Value-Capture Concentration
     ax8 = fig.add_subplot(gs[2, 1])
 
-    if window > 1:
-        smooth_value_hhi = np.convolve(result.value_share_hhi_over_time,
-                                       np.ones(window)/window, mode='valid')
-        smooth_value_top1 = np.convolve(result.value_share_top1_over_time,
-                                        np.ones(window)/window, mode='valid')
-        smooth_value_top3 = np.convolve(result.value_share_top3_over_time,
-                                        np.ones(window)/window, mode='valid')
-    else:
-        smooth_value_hhi = result.value_share_hhi_over_time
-        smooth_value_top1 = result.value_share_top1_over_time
-        smooth_value_top3 = result.value_share_top3_over_time
-
-    ax8.plot(slots_smooth, smooth_value_hhi, label='HHI', linewidth=2, alpha=0.8, color='darkred')
-    ax8.plot(slots_smooth, smooth_value_top1, label='Top-1', linewidth=2, alpha=0.8, color='orange')
-    ax8.plot(slots_smooth, smooth_value_top3, label='Top-3', linewidth=2, alpha=0.8, color='gold')
+    ax8.plot(slots_smooth, result.value_share_hhi_over_time, label='HHI', linewidth=2, alpha=0.8, color='darkred')
+    ax8.plot(slots_smooth, result.value_share_top1_over_time, label='Top-1', linewidth=2, alpha=0.8, color='orange')
+    ax8.plot(slots_smooth, result.value_share_top3_over_time, label='Top-3', linewidth=2, alpha=0.8, color='gold')
     ax8.set_xlabel('Slot', fontsize=10)
     ax8.set_ylabel('Concentration', fontsize=10)
     ax8.set_title('Value-Capture Concentration', fontsize=11, fontweight='bold')
@@ -326,20 +279,8 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 9. Volatility (L1 Change) Metrics
     ax9 = fig.add_subplot(gs[2, 2])
 
-    if window > 1:
-        smooth_region_vol = np.convolve(result.region_volatility_over_time,
-                                        np.ones(window)/window, mode='valid')
-        smooth_prop_vol = np.convolve(result.builder_dist_volatility_over_time,
-                                      np.ones(window)/window, mode='valid')
-        smooth_value_vol = np.convolve(result.value_share_volatility_over_time,
-                                       np.ones(window)/window, mode='valid')
-    else:
-        smooth_region_vol = result.region_volatility_over_time
-        smooth_prop_vol = result.builder_dist_volatility_over_time
-        smooth_value_vol = result.value_share_volatility_over_time
-
-    ax9.plot(slots_smooth, smooth_prop_vol, label='Population Distribution', linewidth=2, alpha=0.8)
-    ax9.plot(slots_smooth, smooth_value_vol, label='Value-Capture', linewidth=2, alpha=0.8)
+    ax9.plot(slots_smooth, result.builder_dist_volatility_over_time, label='Population Distribution', linewidth=2, alpha=0.8)
+    ax9.plot(slots_smooth, result.value_share_volatility_over_time, label='Value-Capture', linewidth=2, alpha=0.8)
     ax9.set_xlabel('Slot', fontsize=10)
     ax9.set_ylabel('L1 Change', fontsize=10)
     ax9.set_title('Volatility (Distribution Churn) Over Time', fontsize=11, fontweight='bold')
@@ -349,14 +290,8 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     # 10. Welfare Over Time (full-width bottom row)
     ax10 = fig.add_subplot(gs[3, :])
 
-    if window > 1 and len(result.welfare_history) > 0:
-        smooth_welfare = np.convolve(result.welfare_history, np.ones(window) / window, mode='valid')
-        slots_welfare = np.arange(window - 1, len(result.welfare_history))
-    else:
-        smooth_welfare = result.welfare_history
-        slots_welfare = np.arange(len(result.welfare_history))
-
-    ax10.plot(slots_welfare, smooth_welfare, linewidth=2, color='steelblue', alpha=0.9, label='Welfare (smoothed)')
+    slots_welfare = np.arange(len(result.welfare_history))
+    ax10.plot(slots_welfare, result.welfare_history, linewidth=2, color='steelblue', alpha=0.9, label='Welfare')
     mean_w = result.stats['mean_welfare']
     ax10.axhline(y=mean_w, color='green', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Mean welfare = {mean_w:.2f}')
     ax10.set_xlabel('Slot', fontsize=10)
@@ -374,7 +309,7 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     policy_info = result.config.policy_type
     if result.config.policy_type == "EMA":
         policy_info += f" (η={result.config.eta}, β_reg={result.config.beta_reg}, c={result.config.cost_c})"
-    else:
+    elif result.config.policy_type == "UCB":
         policy_info += f" (α={result.config.alpha})"
 
     fig.suptitle(f'Experiment: {result.config.name} | {policy_info}',

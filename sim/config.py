@@ -54,7 +54,8 @@ class ExperimentConfig:
     n_slots: int = 10000
     delta: float = 12.0
     n_runs: int = 1
-    initial_placement: str = "round_robin"  # "round_robin", "random", or "concentrated"
+    initial_placement: str = "dispersed"  # "dispersed", "random", or "concentrated"
+    placement_seed: int = PRIMARY_SEED
 
     # Output configuration
     save_results: bool = True
@@ -151,7 +152,7 @@ def load_config(path) -> ExperimentConfig:
         cost_c=pol.get("cost_c", 0.0),
         alpha=pol.get("alpha", 2.0),
         n_t=pol.get("n_t", 100),
-        initial_placement=sim.get("initial_placement", "round_robin"),
+        initial_placement=sim.get("initial_placement", "dispersed"),
     )
 
 

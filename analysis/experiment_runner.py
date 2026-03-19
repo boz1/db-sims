@@ -2,7 +2,7 @@
 import numpy as np
 from typing import List
 
-from sim.config import ExperimentConfig, create_scenario_from_config, get_seeds, PRIMARY_SEED
+from sim.config import ExperimentConfig, create_scenario_from_config, get_seeds
 from analysis.result import ExperimentResult
 from analysis.poa import compute_poa_stats
 from sim.simulator import (
@@ -116,7 +116,7 @@ def _run_single(config: ExperimentConfig, seed: int,
         sharing_rule=EqualSplitSharingRule(),
         delta=config.delta,
         seed=seed,
-        placement_seed=PRIMARY_SEED,
+        placement_seed=config.placement_seed,
         initial_placement=config.initial_placement,
     )
     if config.policy_type == "ABR":

@@ -355,7 +355,7 @@ class LocationGamesSimulator:
                  delta: float,
                  seed: int = 42,
                  placement_seed: int = 0,
-                 initial_placement: str = "round_robin"):
+                 initial_placement: str = "dispersed"):
         """
         Args:
             regions: List of regions
@@ -367,7 +367,7 @@ class LocationGamesSimulator:
             delta: Delta parameter
             seed: Random seed for dynamics (ABR shuffle, tx draws), changes across runs
             placement_seed: Random seed for initial builder placement, fixed across runs
-            initial_placement: "round_robin", "random", or "concentrated"
+            initial_placement: "dispersed", "random", or "concentrated"
         """
         self.regions = regions
         self.sources = sources
@@ -401,17 +401,18 @@ class LocationGamesSimulator:
     def _initialize_builder_distribution(self):
         """Initialize builder locations according to self.initial_placement."""
         for i, builder in enumerate(self.builders):
-            if self.initial_placement == "round_robin":
-                # TODO: What we really want is to disperse builders evenly. Once we start using GCP data we should
-                # incorporate latitude/longitude of regions
-                region = i % self.n_regions
+            if self.initial_placement == "dispersed":
+                # Evenly space builders across regions: builder i goes to region i * n_regions // n_builders
+                # eg 5 builders / 10 regions -> [0, 2, 4, 6, 8]
+                # TODO: Once we start using GCP data we should incorporate latitude/longitude of regions
+                region = i * self.n_regions // self.n_builders
             elif self.initial_placement == "concentrated":
                 region = 0
             elif self.initial_placement == "random":
                 region = int(self._placement_rng.integers(0, self.n_regions))
             else:
                 raise ValueError(f"Unknown initial_placement: {self.initial_placement!r}. "
-                                 f"Use 'round_robin', 'concentrated', or 'random'.")
+                                 f"Use 'dispersed', 'concentrated', or 'random'.")
             builder.set_region(region)
 
     def _get_builder_distribution(self) -> np.ndarray:

@@ -137,12 +137,17 @@ def compute_poa_stats(
         method: 'brute_force' (exact, analytical) or 'greedy'
         n_time_steps: time discretisation for the analytical integral
     """
-    _, sources, _, _ = create_scenario_from_config(result.config)
+    _, sources, latency_mean, latency_std = create_scenario_from_config(result.config)
+    prop_model = _make_prop_model(result.config, latency_mean, latency_std)
+
     w_upper = sum(
         s.lambda_rate * result.config.delta * np.exp(s.mu_val + s.sigma_val ** 2 / 2)
         for s in sources
     )
-    w_learned = result.stats['mean_welfare']
+
+    final_counts = result.region_counts[-1].astype(int)
+    converged_profile = [region for region, count in enumerate(final_counts) for _ in range(count)]
+    w_converged = _compute_welfare_analytical(converged_profile, sources, prop_model, result.config.delta, n_time_steps)
 
     if method == 'brute_force':
         w_star, opt_profile = compute_optimal_welfare_brute_force(result.config, n_time_steps)
@@ -154,10 +159,10 @@ def compute_poa_stats(
     return {
         'w_star': w_star,
         'w_upper': w_upper,
-        'w_learned': w_learned,
+        'w_converged': w_converged,
         'opt_profile': opt_profile,
         'opt_profile_names': [result.config.region_names[r] for r in opt_profile],
-        'poa': w_star / w_learned if w_learned > 0 else float('inf'),
-        'poa_upper_bound': w_upper / w_learned if w_learned > 0 else float('inf'),
+        'poa': w_star / w_converged if w_converged > 0 else float('inf'),
+        'poa_upper_bound': w_upper / w_converged if w_converged > 0 else float('inf'),
         'method': method,
     }

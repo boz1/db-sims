@@ -76,7 +76,7 @@ def run_all():
                 "placement": placement,
                 "poa": poa_stats['poa'],
                 "w_star": poa_stats['w_star'],
-                "w_learned": poa_stats['w_learned'],
+                "w_converged": poa_stats['w_converged'],
                 "hhi": hhi,
                 "convergence_slot": conv,
                 "final_dist": final_dist,
@@ -144,12 +144,12 @@ def _print_table(rows):
     print("EXPERIMENT A — SYMMETRIC BASELINE SUMMARY")
     print(f"{'='*140}")
     header = (f"{'Config':<25} {'Placement':<14} {'PoA':>8} {'HHI':>8} "
-              f"{'Conv.slot':>10} {'W*':>14} {'W_learned':>14}  Final distribution")
+              f"{'Conv.slot':>10} {'W*':>14} {'W_converged':>14}  Final distribution")
     print(header)
     print("-" * 140)
     for r in rows:
         print(f"{r['config']:<25} {r['placement']:<14} {r['poa']:>8.4f} {r['hhi']:>8.4f} "
-              f"{r['convergence_slot']:>10} {r['w_star']:>14.6f} {r['w_learned']:>14.6f}  "
+              f"{r['convergence_slot']:>10} {r['w_star']:>14.6f} {r['w_converged']:>14.6f}  "
               f"{r['final_dist']}")
     print("=" * 140)
 

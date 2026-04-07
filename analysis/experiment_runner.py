@@ -176,7 +176,7 @@ def run_experiment(config: ExperimentConfig, verbose: bool = True,
         if verbose:
             p = result.poa_stats
             print(f"W* (optimal): {p['w_star']:.4f}")
-            print(f"W  (learned): {p['w_learned']:.4f}")
+            print(f"W (converged): {p['w_converged']:.4f}")
             print(f"PoA: {p['poa']:.4f}")
             print(f"Optimal profile: {p['opt_profile_names']}")
 

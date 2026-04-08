@@ -175,8 +175,8 @@ def run_experiment(config: ExperimentConfig, verbose: bool = True,
         result.poa_stats = compute_poa_stats(result, method=poa_method)
         if verbose:
             p = result.poa_stats
-            print(f"W* (optimal): {p['w_star']:.4f}")
-            print(f"W (converged): {p['w_converged']:.4f}")
+            print(f"W* (optimal): {p['w_star']:.6f}")
+            print(f"W (converged): {p['w_converged']:.6f}")
             print(f"PoA: {p['poa']:.4f}")
             print(f"Optimal profile: {p['opt_profile_names']}")
 
@@ -199,16 +199,11 @@ def print_results(result: ExperimentResult, regions: List[Region], sources: List
     print(f"Mean txs received per round: {stats['mean_txs_received_per_round']:.2f}")
     print(f"Mean coverage ratio: {stats['mean_coverage_ratio']:.4f}")
 
-    print(f"\nBuilder distribution across regions (avg over time):")
-    for i, count in enumerate(stats['avg_builder_distribution']):
-        print(f"  {regions[i].name:15s}: {count:6.2f} builders")
-
     print(f"\nRegion selection per slot (avg builders per slot):")
     for i, count in enumerate(stats['avg_region_counts']):
-        print(f"  {regions[i].name:15s}: {count:6.2f}")
+        print(f"  {regions[i].name}: {count:.2f}")
 
     print(f"\nDiversity metrics:")
-    print(f"  Builder Dist Gini:    {stats['builder_dist_gini']:.4f} (lower = more equal)")
-    print(f"  Builder Dist Entropy: {stats['builder_dist_entropy']:.4f} (higher = more equal)")
-    print(f"  Region Gini:           {stats['region_gini']:.4f}")
-    print(f"  Region Entropy:        {stats['region_entropy']:.4f}")
+    print(f"  Builder Dist Gini: {stats['builder_dist_gini']:.4f}")
+    print(f"  Builder Dist Entropy: {stats['builder_dist_entropy']:.4f}")
+    print(f"  Builder Dist HHI: {stats['builder_dist_hhi']:.4f}")

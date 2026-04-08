@@ -271,7 +271,7 @@ class StochasticTransactionGenerator(TransactionGenerator):
 
 
 def precompute_sharing_weights(
-    other_regions: List[int],
+    other_builder_regions: List[int],
     sources: List[Source],
     propagation_model: PropagationModel,
     delta: float,
@@ -283,13 +283,13 @@ def precompute_sharing_weights(
     """
     t_points = np.linspace(0, delta, n_t, endpoint=False)
     remaining = delta - t_points
-    n_other = len(other_regions)
+    n_other = len(other_builder_regions)
     weights = np.zeros((len(sources), n_t))
 
     for i, source in enumerate(sources):
         # Reception probabilities: probs[b, n] = P(static builder b receives tx at time t_n)
         probs = np.zeros((n_other, n_t))
-        for builder, region in enumerate(other_regions):
+        for builder, region in enumerate(other_builder_regions):
             for n, rem in enumerate(remaining):
                 probs[builder, n] = propagation_model.reception_prob(region, source.id, rem)
 
@@ -486,10 +486,10 @@ class LocationGamesSimulator:
         locations and rewards are recorded.
         """
         active = self.builders[round_index % self.n_builders]
-        other_regions = [builder.current_region for builder in self.builders if builder.id != active.id]
+        other_builder_regions = [builder.current_region for builder in self.builders if builder.id != active.id]
 
         sharing_weights = precompute_sharing_weights(
-            other_regions, self.sources, self.propagation_model, self.delta, n_t
+            other_builder_regions, self.sources, self.propagation_model, self.delta, n_t
         )
         u_current = compute_expected_reward(
             active.current_region, sharing_weights, self.sources,
@@ -543,6 +543,13 @@ class LocationGamesSimulator:
             probs = probs[probs > 0]
             return float(-np.sum(probs * np.log(probs)) / np.log(len(counts)))
 
+        def hhi(counts: np.ndarray) -> float:
+            total = np.sum(counts)
+            if total == 0:
+                return 0.0
+            shares = counts / total
+            return float(np.sum(shares ** 2))
+
         welfare = np.array(self.welfare_history)
         mean_txs_emitted = float(np.mean(self.tx_emitted_history)) if self.tx_emitted_history else 0.0
         mean_txs_received = float(np.mean(self.tx_received_history)) if self.tx_received_history else 0.0
@@ -557,10 +564,9 @@ class LocationGamesSimulator:
             'avg_region_counts': avg_region_counts,
             'avg_builder_distribution': avg_builder_distribution,
             'avg_reward': avg_reward,
-            'region_gini': gini(avg_region_counts),
             'builder_dist_gini': gini(avg_builder_distribution),
-            'region_entropy': entropy(avg_region_counts),
             'builder_dist_entropy': entropy(avg_builder_distribution),
+            'builder_dist_hhi': hhi(avg_builder_distribution),
             'total_slots': len(self.region_counts_history),
             'mean_welfare': float(np.mean(welfare)) if len(welfare) > 0 else 0.0,
             'mean_txs_emitted_per_round': mean_txs_emitted,

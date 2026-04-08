@@ -73,13 +73,10 @@ class ExperimentResult:
             return np.sum(np.abs(p1 - p2))
 
         # Initialize metric lists
-        self.region_gini_over_time = []
-        self.region_entropy_over_time = []
         self.builder_dist_gini_over_time = []
         self.builder_dist_entropy_over_time = []
 
         # HHI metrics
-        self.region_hhi_over_time = []
         self.builder_dist_hhi_over_time = []
 
         # Value-capture metrics
@@ -102,12 +99,9 @@ class ExperimentResult:
         n_regions = self.config.n_regions
 
         for t in range(len(self.region_counts)):
-            self.region_gini_over_time.append(gini(self.region_counts[t]))
-            self.region_entropy_over_time.append(entropy(self.region_counts[t]))
             self.builder_dist_gini_over_time.append(gini(self.builder_distribution[t]))
             self.builder_dist_entropy_over_time.append(entropy(self.builder_distribution[t]))
 
-            self.region_hhi_over_time.append(hhi(self.region_counts[t]))
             self.builder_dist_hhi_over_time.append(hhi(self.builder_distribution[t]))
 
             value_by_region = np.zeros(n_regions)
@@ -221,11 +215,8 @@ class ExperimentResult:
             welfare_history=self.welfare_history,
             tx_emitted_history=self.tx_emitted_history,
             tx_received_history=self.tx_received_history,
-            region_gini_over_time=np.array(self.region_gini_over_time),
-            region_entropy_over_time=np.array(self.region_entropy_over_time),
             builder_dist_gini_over_time=np.array(self.builder_dist_gini_over_time),
             builder_dist_entropy_over_time=np.array(self.builder_dist_entropy_over_time),
-            region_hhi_over_time=np.array(self.region_hhi_over_time),
             builder_dist_hhi_over_time=np.array(self.builder_dist_hhi_over_time),
             value_capture_by_region=self.value_capture_by_region,
             value_share_distribution=self.value_share_distribution,
@@ -262,11 +253,8 @@ class ExperimentResult:
         result.tx_emitted_history = data.get('tx_emitted_history', np.array([]))
         result.tx_received_history = data.get('tx_received_history', np.array([]))
         result.region_reward_pairs = []
-        result.region_gini_over_time = list(data['region_gini_over_time'])
-        result.region_entropy_over_time = list(data['region_entropy_over_time'])
         result.builder_dist_gini_over_time = list(data['builder_dist_gini_over_time'])
         result.builder_dist_entropy_over_time = list(data['builder_dist_entropy_over_time'])
-        result.region_hhi_over_time = list(data.get('region_hhi_over_time', []))
         result.builder_dist_hhi_over_time = list(data.get('builder_dist_hhi_over_time', []))
         result.value_capture_by_region = data.get('value_capture_by_region', np.array([]))
         result.value_share_distribution = data.get('value_share_distribution', np.array([]))

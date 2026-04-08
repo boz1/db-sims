@@ -101,7 +101,7 @@ def _plot_config(config, placement_results: dict):
     for placement, result in placement_results.items():
         ax_gini.plot(result.builder_dist_gini_over_time,
                      label=placement, color=colors[placement], linewidth=2, alpha=0.85)
-    ax_gini.set_title("Builder Distribution Gini (lower = more equal)", fontsize=11)
+    ax_gini.set_title("Builder Distribution Gini", fontsize=11)
     ax_gini.set_xlabel("Slot")
     ax_gini.set_ylabel("Gini")
     ax_gini.legend()
@@ -112,7 +112,7 @@ def _plot_config(config, placement_results: dict):
     for placement, result in placement_results.items():
         ax_hhi.plot(result.builder_dist_hhi_over_time,
                     label=placement, color=colors[placement], linewidth=2, alpha=0.85)
-    ax_hhi.set_title("Builder Distribution HHI (lower = more dispersed)", fontsize=11)
+    ax_hhi.set_title("Builder Distribution HHI", fontsize=11)
     ax_hhi.set_xlabel("Slot")
     ax_hhi.set_ylabel("HHI")
     ax_hhi.legend()

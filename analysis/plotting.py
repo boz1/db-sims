@@ -16,7 +16,6 @@ def compare_experiments(results: List[ExperimentResult],
     Args:
         results: List of ExperimentResult objects to compare
         metrics: List of metrics to plot. Options:
-                 - 'region_gini', 'region_entropy', 'region_hhi'
                  - 'source_gini', 'source_entropy', 'source_hhi'
                  - 'builder_dist_gini', 'builder_dist_entropy', 'builder_dist_hhi'
                  - 'value_share_hhi', 'value_share_entropy'
@@ -29,10 +28,6 @@ def compare_experiments(results: List[ExperimentResult],
     if metrics is None:
         metrics = ['builder_dist_gini', 'builder_dist_entropy', 'builder_dist_hhi',
                    'region_volatility', 'value_share_hhi', 'reward', 'welfare']
-
-    print(f"\n[DEBUG] compare_experiments called with {len(results)} results:")
-    for i, r in enumerate(results):
-        print(f"  [{i}] {r.config.name} ({r.config.policy_type})")
 
     n_metrics = len(metrics)
     # Use 3x3 grid layout (supports up to 9 metrics; extras are hidden)
@@ -52,7 +47,6 @@ def compare_experiments(results: List[ExperimentResult],
     # Color scheme and line styles for better distinction
     colors = plt.cm.tab10(np.linspace(0, 1, len(results)))
     line_styles = ['-', '--', '-.', ':']  # Solid, dashed, dash-dot, dotted
-    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p']  # Different markers
 
     for metric_idx, metric in enumerate(metrics):
         if metric_idx >= len(axes):
@@ -62,14 +56,11 @@ def compare_experiments(results: List[ExperimentResult],
 
         for result_idx, result in enumerate(results):
             metric_map = {
-                'region_gini': (result.region_gini_over_time, 'Region Gini (lower = more diverse)'),
-                'region_entropy': (result.region_entropy_over_time, 'Region Entropy (higher = more diverse)'),
-                'region_hhi': (result.region_hhi_over_time, 'Region HHI (lower = more diverse)'),
-                'builder_dist_gini': (result.builder_dist_gini_over_time, 'Builder Distribution Gini (lower = more equal)'),
-                'builder_dist_entropy': (result.builder_dist_entropy_over_time, 'Builder Distribution Entropy (higher = more equal)'),
-                'builder_dist_hhi': (result.builder_dist_hhi_over_time, 'Builder Distribution HHI (lower = more equal)'),
-                'value_share_hhi': (result.value_share_hhi_over_time, 'Value-Capture HHI (lower = more equal)'),
-                'value_share_entropy': (result.value_share_entropy_over_time, 'Value-Capture Entropy (higher = more equal)'),
+                'builder_dist_gini': (result.builder_dist_gini_over_time, 'Builder Distribution Gini'),
+                'builder_dist_entropy': (result.builder_dist_entropy_over_time, 'Builder Distribution Entropy'),
+                'builder_dist_hhi': (result.builder_dist_hhi_over_time, 'Builder Distribution HHI'),
+                'value_share_hhi': (result.value_share_hhi_over_time, 'Value-Capture HHI'),
+                'value_share_entropy': (result.value_share_entropy_over_time, 'Value-Capture Entropy'),
                 'value_share_top1': (result.value_share_top1_over_time, 'Value-Capture Top-1 Concentration'),
                 'value_share_top3': (result.value_share_top3_over_time, 'Value-Capture Top-3 Concentration'),
                 'region_volatility': (result.region_volatility_over_time, 'Region Selection Volatility (L1 change)'),
@@ -98,7 +89,6 @@ def compare_experiments(results: List[ExperimentResult],
             # Plot with distinct line style
             label = f"{result.config.name} ({result.config.policy_type})"
             linestyle = line_styles[result_idx % len(line_styles)]
-            print(f"    Plotting {result.config.name}: {len(smoothed)} points, color idx {result_idx}, style {linestyle}")
             ax.plot(slots, smoothed, label=label, linewidth=2.5,
                    color=colors[result_idx], linestyle=linestyle, alpha=0.9)
 
@@ -107,8 +97,6 @@ def compare_experiments(results: List[ExperimentResult],
         ax.set_title(f'{metric.replace("_", " ").title()} Over Time', fontsize=12, fontweight='bold')
         ax.legend(loc='best', framealpha=0.95, fontsize=10, edgecolor='black', fancybox=True)
         ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
-
-        print(f"  [DEBUG] Plotted {len(results)} lines for metric '{metric}'")
 
     # Hide unused subplots
     for idx in range(n_metrics, len(axes)):
@@ -440,23 +428,22 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
 
 def print_comparison_table(results: List[ExperimentResult]):
     """Print a comparison table of final metrics."""
-    print(f"\n{'='*120}")
+    print(f"\n{'='*107}")
     print("EXPERIMENT COMPARISON TABLE")
-    print(f"{'='*120}")
+    print(f"{'='*107}")
 
     # Header
     print(f"\n{'Experiment':<25} {'Policy':<8} {'Reward':<12} {'Welfare':<12} "
-          f"{'BuilderDist':<12} {'BuilderDist':<12} {'Region':<12} {'Region':<12} {'Coverage':<12}")
+          f"{'BuilderDist':<12} {'BuilderDist':<12} {'BuilderDist':<12} {'Coverage':<12}")
     print(f"{'':25} {'':8} {'':12} {'Mean':<12} "
-          f"{'Gini':<12} {'Entropy':<12} {'Gini':<12} {'Entropy':<12} {'Ratio':<12}")
-    print("-" * 120)
+          f"{'Gini':<12} {'Entropy':<12} {'HHI':<12} {'Ratio':<12}")
+    print("-" * 107)
 
     for result in results:
         stats = result.stats
         print(f"{result.config.name:<25} {result.config.policy_type:<8} "
               f"{stats['avg_reward']:<12.4f} {stats['mean_welfare']:<12.4f} "
               f"{stats['builder_dist_gini']:<12.4f} {stats['builder_dist_entropy']:<12.4f} "
-              f"{stats['region_gini']:<12.4f} {stats['region_entropy']:<12.4f} "
-              f"{stats['mean_coverage_ratio']:<12.4f}")
+              f"{stats['builder_dist_hhi']:<12.4f} {stats['mean_coverage_ratio']:<12.4f}")
 
-    print("="*120)
+    print("="*107)

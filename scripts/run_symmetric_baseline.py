@@ -63,12 +63,14 @@ def run_all():
 
             conv = convergence_slot(result.builder_dist_volatility_over_time)
             final_dist = result.region_counts[-1].astype(int).tolist()
-            hhi = result.builder_dist_hhi_over_time[-1]
+            location_hhi = result.location_hhi_over_time[-1]
+            utility_hhi = result.stats['utility_hhi']
 
-            print(f"PoA:         {poa_stats['poa']:.4f}")
-            print(f"HHI:         {hhi:.4f}")
-            print(f"Converged:   slot {conv}")
-            print(f"Final dist:  {final_dist}")
+            print(f"PoA:          {poa_stats['poa']:.4f}")
+            print(f"Location HHI: {location_hhi:.4f}")
+            print(f"Utility HHI:  {utility_hhi:.4f}")
+            print(f"Converged:    slot {conv}")
+            print(f"Final dist:   {final_dist}")
 
             placement_results[placement] = result
             table_rows.append({
@@ -77,7 +79,8 @@ def run_all():
                 "poa": poa_stats['poa'],
                 "w_star": poa_stats['w_star'],
                 "w_converged": poa_stats['w_converged'],
-                "hhi": hhi,
+                "location_hhi": location_hhi,
+                "utility_hhi": utility_hhi,
                 "convergence_slot": conv,
                 "final_dist": final_dist,
             })
@@ -99,9 +102,11 @@ def _plot_config(config, placement_results: dict):
     # Top panel: Gini
     ax_gini = fig.add_subplot(n_placements + 2, 1, 1)
     for placement, result in placement_results.items():
-        ax_gini.plot(result.builder_dist_gini_over_time,
-                     label=placement, color=colors[placement], linewidth=2, alpha=0.85)
-    ax_gini.set_title("Builder Distribution Gini", fontsize=11)
+        ax_gini.plot(result.location_gini_over_time,
+                     label=f"{placement} (location)", color=colors[placement], linewidth=2, alpha=0.85)
+        ax_gini.plot(result.utility_gini_over_time,
+                     color=colors[placement], linewidth=1.5, alpha=0.6, linestyle='--')
+    ax_gini.set_title("Gini — Location (solid) vs Utility (dashed)", fontsize=11)
     ax_gini.set_xlabel("Slot")
     ax_gini.set_ylabel("Gini")
     ax_gini.legend()
@@ -110,9 +115,11 @@ def _plot_config(config, placement_results: dict):
     # Second panel: HHI
     ax_hhi = fig.add_subplot(n_placements + 2, 1, 2)
     for placement, result in placement_results.items():
-        ax_hhi.plot(result.builder_dist_hhi_over_time,
-                    label=placement, color=colors[placement], linewidth=2, alpha=0.85)
-    ax_hhi.set_title("Builder Distribution HHI", fontsize=11)
+        ax_hhi.plot(result.location_hhi_over_time,
+                    label=f"{placement} (location)", color=colors[placement], linewidth=2, alpha=0.85)
+        ax_hhi.plot(result.utility_hhi_over_time,
+                    color=colors[placement], linewidth=1.5, alpha=0.6, linestyle='--')
+    ax_hhi.set_title("HHI — Location (solid) vs Utility (dashed)", fontsize=11)
     ax_hhi.set_xlabel("Slot")
     ax_hhi.set_ylabel("HHI")
     ax_hhi.legend()
@@ -140,18 +147,19 @@ def _plot_config(config, placement_results: dict):
 
 
 def _print_table(rows):
-    print(f"\n\n{'='*140}")
+    print(f"\n\n{'='*160}")
     print("EXPERIMENT A — SYMMETRIC BASELINE SUMMARY")
-    print(f"{'='*140}")
-    header = (f"{'Config':<25} {'Placement':<14} {'PoA':>8} {'HHI':>8} "
+    print(f"{'='*160}")
+    header = (f"{'Config':<25} {'Placement':<14} {'PoA':>8} {'Loc.HHI':>10} {'Util.HHI':>10} "
               f"{'Conv.slot':>10} {'W*':>14} {'W_converged':>14}  Final distribution")
     print(header)
-    print("-" * 140)
+    print("-" * 160)
     for r in rows:
-        print(f"{r['config']:<25} {r['placement']:<14} {r['poa']:>8.4f} {r['hhi']:>8.4f} "
+        print(f"{r['config']:<25} {r['placement']:<14} {r['poa']:>8.4f} "
+              f"{r['location_hhi']:>10.4f} {r['utility_hhi']:>10.4f} "
               f"{r['convergence_slot']:>10} {r['w_star']:>14.6f} {r['w_converged']:>14.6f}  "
               f"{r['final_dist']}")
-    print("=" * 140)
+    print("=" * 160)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from scipy.stats import norm
 from typing import List, Dict
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from sim.metrics import gini, entropy, hhi
 
 @dataclass
 class Transaction:
@@ -336,6 +337,28 @@ def compute_expected_reward(
     return total
 
 
+def compute_all_builder_utilities(
+    profile: List[int],
+    sources: List[Source],
+    propagation_model: PropagationModel,
+    delta: float,
+    n_t: int = 100,
+) -> np.ndarray:
+    """Compute analytical expected utility u_b(s) for every builder in the profile.
+    """
+    K = len(profile)
+    utilities = np.zeros(K)
+    for builder in range(K):
+        other_regions = [profile[i] for i in range(K) if i != builder]
+        weights = precompute_sharing_weights(
+            other_regions, sources, propagation_model, delta, n_t
+        )
+        utilities[builder] = compute_expected_reward(
+            profile[builder], weights, sources, propagation_model, delta, n_t
+        )
+    return utilities
+
+
 class LocationGamesSimulator:
     """
     Core simulator for studying location choice in decentralized block building.
@@ -521,34 +544,9 @@ class LocationGamesSimulator:
         builder_distribution = np.array(self.builder_distribution_history)
 
         avg_region_counts = np.mean(region_counts, axis=0) if len(region_counts) > 0 else np.zeros(self.n_regions)
-        avg_builder_distribution = np.mean(builder_distribution, axis=0) if len(builder_distribution) > 0 else np.zeros(self.n_regions)
 
         all_rewards = [r for slot_rewards in self.reward_history for r in slot_rewards]
         avg_reward = float(np.mean(all_rewards)) if all_rewards else 0.0
-
-        def gini(x: np.ndarray) -> float:
-            total = np.sum(x)
-            if total == 0:
-                return 0.0
-            sorted_x = np.sort(x)
-            n = len(x)
-            cumsum = np.cumsum(sorted_x)
-            return float((2 * np.sum((np.arange(1, n + 1)) * sorted_x)) / (n * cumsum[-1]) - (n + 1) / n)
-
-        def entropy(counts: np.ndarray) -> float:
-            total = np.sum(counts)
-            if total == 0 or len(counts) <= 1:
-                return 0.0
-            probs = counts / total
-            probs = probs[probs > 0]
-            return float(-np.sum(probs * np.log(probs)) / np.log(len(counts)))
-
-        def hhi(counts: np.ndarray) -> float:
-            total = np.sum(counts)
-            if total == 0:
-                return 0.0
-            shares = counts / total
-            return float(np.sum(shares ** 2))
 
         welfare = np.array(self.welfare_history)
         mean_txs_emitted = float(np.mean(self.tx_emitted_history)) if self.tx_emitted_history else 0.0
@@ -560,13 +558,28 @@ class LocationGamesSimulator:
         all_slot_rewards = [sum(s) / len(s) for s in self.reward_history if s]
         mean_value_per_builder = float(np.mean(all_slot_rewards)) if all_slot_rewards else 0.0
 
+        # Location metrics: use last slot's deterministic builder distribution
+        last_builder_dist = (
+            builder_distribution[-1] if len(builder_distribution) > 0
+            else np.zeros(self.n_regions)
+        )
+
+        # Utility metrics: analytical expected utility u_b(s*) at the converged profile
+        final_profile = [b.current_region for b in self.builders]
+        utilities = compute_all_builder_utilities(
+            final_profile, self.sources, self.propagation_model, self.delta
+        )
+
         return {
             'avg_region_counts': avg_region_counts,
-            'avg_builder_distribution': avg_builder_distribution,
+            'avg_builder_distribution': np.mean(builder_distribution, axis=0) if len(builder_distribution) > 0 else np.zeros(self.n_regions),
             'avg_reward': avg_reward,
-            'builder_dist_gini': gini(avg_builder_distribution),
-            'builder_dist_entropy': entropy(avg_builder_distribution),
-            'builder_dist_hhi': hhi(avg_builder_distribution),
+            'location_gini': gini(last_builder_dist),
+            'location_entropy': entropy(last_builder_dist),
+            'location_hhi': hhi(last_builder_dist),
+            'utility_gini': gini(utilities),
+            'utility_entropy': entropy(utilities),
+            'utility_hhi': hhi(utilities),
             'total_slots': len(self.region_counts_history),
             'mean_welfare': float(np.mean(welfare)) if len(welfare) > 0 else 0.0,
             'mean_txs_emitted_per_round': mean_txs_emitted,

@@ -61,8 +61,8 @@ def main():
     if len(results) > 1:
         compare_experiments(
             results,
-            metrics=["builder_dist_hhi", "builder_dist_entropy", "value_share_hhi",
-                     "value_share_top1", "region_volatility", "reward", "welfare"],
+            metrics=["location_hhi", "utility_hhi", "location_entropy", "utility_entropy",
+                     "value_share_hhi", "value_share_top1", "region_volatility", "welfare"],
             save_plots=True,
         )
 

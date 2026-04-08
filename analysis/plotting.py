@@ -8,35 +8,42 @@ from sim.config import ExperimentConfig
 from analysis.result import ExperimentResult
 
 def compare_experiments(results: List[ExperimentResult],
-                       metrics: List[str] = None,
-                       save_plots: bool = True):
+                        metrics: List[str] = None,
+                        save_plots: bool = True):
     """
     Compare multiple experiments by plotting metrics over time.
 
     Args:
-        results: List of ExperimentResult objects to compare
+        results: List of ExperimentResult objects to compare.
         metrics: List of metrics to plot. Options:
-                 - 'source_gini', 'source_entropy', 'source_hhi'
-                 - 'builder_dist_gini', 'builder_dist_entropy', 'builder_dist_hhi'
-                 - 'value_share_hhi', 'value_share_entropy'
-                 - 'value_share_top1', 'value_share_top3'
-                 - 'region_volatility', 'builder_dist_volatility', 'value_share_volatility'
-                 - 'reward'
-                 If None, plots default set of metrics
+                 Location concentration (over builder counts per region):
+                   'location_gini', 'location_entropy', 'location_hhi'
+                 Utility concentration (over per-builder rewards):
+                   'utility_gini', 'utility_entropy', 'utility_hhi'
+                 Value-capture:
+                   'value_share_hhi', 'value_share_entropy'
+                   'value_share_top1', 'value_share_top3'
+                 Volatility:
+                   'region_volatility', 'builder_dist_volatility', 'value_share_volatility'
+                 Other:
+                   'reward', 'welfare'
+                 If None, plots the default set
         save_plots: Whether to save plots to disk
     """
     if metrics is None:
-        metrics = ['builder_dist_gini', 'builder_dist_entropy', 'builder_dist_hhi',
-                   'region_volatility', 'value_share_hhi', 'reward', 'welfare']
+        metrics = [
+            'location_hhi', 'utility_hhi',
+            'location_entropy', 'utility_entropy',
+            'value_share_hhi', 'region_volatility',
+            'reward', 'welfare',
+        ]
 
     n_metrics = len(metrics)
-    # Use 3x3 grid layout (supports up to 9 metrics; extras are hidden)
     n_rows = 3
     n_cols = 3
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 15))
-    axes = axes.flatten()  # Flatten to 1D array for easier indexing
+    axes = axes.flatten()
 
-    # Create descriptive title with experiment names
     exp_names = ", ".join([r.config.name for r in results])
     if len(exp_names) > 80:
         exp_names = ", ".join([r.config.name for r in results[:3]])
@@ -56,9 +63,12 @@ def compare_experiments(results: List[ExperimentResult],
 
         for result_idx, result in enumerate(results):
             metric_map = {
-                'builder_dist_gini': (result.builder_dist_gini_over_time, 'Builder Distribution Gini'),
-                'builder_dist_entropy': (result.builder_dist_entropy_over_time, 'Builder Distribution Entropy'),
-                'builder_dist_hhi': (result.builder_dist_hhi_over_time, 'Builder Distribution HHI'),
+                'location_gini': (result.location_gini_over_time, 'Location Gini'),
+                'location_entropy': (result.location_entropy_over_time, 'Location Entropy'),
+                'location_hhi': (result.location_hhi_over_time, 'Location HHI'),
+                'utility_gini': (result.utility_gini_over_time, 'Utility Gini'),
+                'utility_entropy': (result.utility_entropy_over_time, 'Utility Entropy'),
+                'utility_hhi': (result.utility_hhi_over_time, 'Utility HHI'),
                 'value_share_hhi': (result.value_share_hhi_over_time, 'Value-Capture HHI'),
                 'value_share_entropy': (result.value_share_entropy_over_time, 'Value-Capture Entropy'),
                 'value_share_top1': (result.value_share_top1_over_time, 'Value-Capture Top-1 Concentration'),
@@ -90,7 +100,7 @@ def compare_experiments(results: List[ExperimentResult],
             label = f"{result.config.name} ({result.config.policy_type})"
             linestyle = line_styles[result_idx % len(line_styles)]
             ax.plot(slots, smoothed, label=label, linewidth=2.5,
-                   color=colors[result_idx], linestyle=linestyle, alpha=0.9)
+                    color=colors[result_idx], linestyle=linestyle, alpha=0.9)
 
         ax.set_xlabel('Slot', fontsize=11)
         ax.set_ylabel(ylabel, fontsize=11)
@@ -122,16 +132,9 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     """
     Plot detailed time-series for a single experiment.
 
-    Creates separate plots for:
-    - Region selection over time (stacked area or line plot)
-    - Source selection over time
-    - builder distribution over time
-    - Diversity metrics (Gini, Entropy)
-    - Rewards
-
-    Args:
-        result: ExperimentResult object
-        save_plots: Whether to save plots to disk
+    Each concentration metric (Gini, Entropy, HHI) shows two lines:
+      - Location (deterministic, based on builder counts per region)
+      - Utility (stochastic, based on observed per-builder rewards)
     """
     print(f"\n[DEBUG] Plotting details for experiment: {result.config.name}")
 
@@ -162,90 +165,93 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
     ]).T  # (n_slots, n_continents)
     colors_continents = plt.cm.tab10(np.linspace(0, 1, len(continent_names)))
 
-    # Row 1: Distributions
-    # 1. Region Selection Over Time (stacked area, aggregated by continent)
+    # Row 1
+    # 1. Region selection stacked area
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.stackplot(slots, *continent_counts.T,
-                  labels=continent_names,
-                  colors=colors_continents, alpha=0.7)
+                  labels=continent_names, colors=colors_continents, alpha=0.7)
     ax1.set_xlabel('Slot', fontsize=10)
     ax1.set_ylabel('Number of builders', fontsize=10)
     ax1.set_title('Region Selection Per Slot', fontsize=11, fontweight='bold')
     ax1.legend(loc='upper center', bbox_to_anchor=(0.5, -0.18), ncol=5, fontsize=7, framealpha=0.9)
     ax1.grid(True, alpha=0.3)
 
-    # 2. Transactions per Round + Coverage Ratio
-    ax2 = fig.add_subplot(gs[0, 2])
-    slots_txs = np.arange(len(result.tx_emitted_history))
-    ax2.plot(slots_txs, result.tx_emitted_history, linewidth=2, color='lightgray', alpha=0.9, label='Emitted')
-    ax2.plot(slots_txs, result.tx_received_history, linewidth=2, color='steelblue', alpha=0.8, label='Received')
-    ax2.set_xlabel('Slot', fontsize=10)
-    ax2.set_ylabel('Transactions', fontsize=10)
-    ax2.set_title('Transactions per Round', fontsize=11, fontweight='bold')
-    ax2.legend(loc='upper right', fontsize=8, framealpha=0.9)
-
-    ax2_cov = ax2.twinx()
-    coverage_series = np.where(result.tx_emitted_history > 0,
-                               result.tx_received_history / result.tx_emitted_history, 0.0)
-    ax2_cov.plot(slots_txs, coverage_series, linewidth=1.5, color='green', alpha=0.7, linestyle='--', label='Coverage')
-    ax2_cov.set_ylabel('Coverage ratio', fontsize=9, color='green')
-    ax2_cov.set_ylim(0, 1)
-    ax2_cov.tick_params(axis='y', labelcolor='green')
-    ax2_cov.legend(loc='lower right', fontsize=8, framealpha=0.9)
-
-    ax2.grid(True, alpha=0.3)
-
-    # 3. Region Occupancy Heatmap (granular view of which regions have builders)
-    ax3 = fig.add_subplot(gs[0, 1])
-    region_counts_matrix = np.array(result.region_counts)  # (n_slots, n_regions)
+    # 2. Region occupancy heatmap
+    ax2 = fig.add_subplot(gs[0, 1])
+    region_counts_matrix = np.array(result.region_counts)
     active_mask = region_counts_matrix.max(axis=0) > 0
     active_indices = np.where(active_mask)[0]
-    active_matrix = region_counts_matrix[:, active_indices].T  # (n_active_regions, n_slots)
-    region_labels = [result.config.region_names[i] for i in active_indices] if result.config.region_names else [str(i) for i in active_indices]
-    im = ax3.imshow(active_matrix, aspect='auto', interpolation='nearest', cmap='YlOrRd',
+    active_matrix = region_counts_matrix[:, active_indices].T
+    region_labels = ([result.config.region_names[i] for i in active_indices]
+                     if result.config.region_names else [str(i) for i in active_indices])
+    im = ax2.imshow(active_matrix, aspect='auto', interpolation='nearest', cmap='YlOrRd',
                     extent=[0, len(slots), len(active_indices), 0])
-    ax3.set_yticks(np.arange(len(active_indices)) + 0.5)
-    ax3.set_yticklabels(region_labels, fontsize=6)
+    ax2.set_yticks(np.arange(len(active_indices)) + 0.5)
+    ax2.set_yticklabels(region_labels, fontsize=6)
+    ax2.set_xlabel('Slot', fontsize=10)
+    ax2.set_title('Region Occupancy Heatmap', fontsize=11, fontweight='bold')
+    plt.colorbar(im, ax=ax2, label='Builders', shrink=0.8)
+
+    # 3. Transactions per round + coverage
+    ax3 = fig.add_subplot(gs[0, 2])
+    slots_txs = np.arange(len(result.tx_emitted_history))
+    ax3.plot(slots_txs, result.tx_emitted_history, linewidth=2, color='lightgray', alpha=0.9, label='Emitted')
+    ax3.plot(slots_txs, result.tx_received_history, linewidth=2, color='steelblue', alpha=0.8, label='Received')
     ax3.set_xlabel('Slot', fontsize=10)
-    ax3.set_title('Region Occupancy Heatmap', fontsize=11, fontweight='bold')
-    plt.colorbar(im, ax=ax3, label='Builders', shrink=0.8)
+    ax3.set_ylabel('Transactions', fontsize=10)
+    ax3.set_title('Transactions per Round', fontsize=11, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=8, framealpha=0.9)
+    ax3_cov = ax3.twinx()
+    coverage_series = np.where(result.tx_emitted_history > 0,
+                               result.tx_received_history / result.tx_emitted_history, 0.0)
+    ax3_cov.plot(slots_txs, coverage_series, linewidth=1.5, color='green', alpha=0.7,
+                 linestyle='--', label='Coverage')
+    ax3_cov.set_ylabel('Coverage ratio', fontsize=9, color='green')
+    ax3_cov.set_ylim(0, 1)
+    ax3_cov.tick_params(axis='y', labelcolor='green')
+    ax3_cov.legend(loc='lower right', fontsize=8, framealpha=0.9)
+    ax3.grid(True, alpha=0.3)
 
-    # Row 2: Traditional Metrics
-    # 4. Diversity Metrics - Gini
+    # Row 2
+    # 4. Gini: location + utility on same panel
     ax4 = fig.add_subplot(gs[1, 0])
-
-    slots_smooth = slots
-    ax4.plot(slots_smooth, result.builder_dist_gini_over_time, label='Builder Distribution', linewidth=2, alpha=0.8)
+    ax4.plot(slots, result.location_gini_over_time,
+             label='Location', linewidth=2, alpha=0.9, color='steelblue')
+    ax4.plot(slots, result.utility_gini_over_time,
+             label='Utility', linewidth=1.5, alpha=0.7, color='darkorange', linestyle='--')
     ax4.set_xlabel('Slot', fontsize=10)
     ax4.set_ylabel('Gini Coefficient', fontsize=10)
     ax4.set_title('Gini (Inequality) Over Time', fontsize=11, fontweight='bold')
     ax4.legend(loc='best', fontsize=9, framealpha=0.9)
     ax4.grid(True, alpha=0.3)
 
-    # 5. Diversity Metrics - Entropy
+    # 5. Entropy: location + utility on same panel
     ax5 = fig.add_subplot(gs[1, 1])
-
-    ax5.plot(slots_smooth, result.builder_dist_entropy_over_time, label='Builder Distribution', linewidth=2, alpha=0.8)
+    ax5.plot(slots, result.location_entropy_over_time,
+             label='Location', linewidth=2, alpha=0.9, color='steelblue')
+    ax5.plot(slots, result.utility_entropy_over_time,
+             label='Utility', linewidth=1.5, alpha=0.7, color='darkorange', linestyle='--')
     ax5.set_xlabel('Slot', fontsize=10)
-    ax5.set_ylabel('Normalized Entropy', fontsize=10)
+    ax5.set_ylabel('Normalised Entropy', fontsize=10)
     ax5.set_title('Entropy (Diversity) Over Time', fontsize=11, fontweight='bold')
     ax5.legend(loc='best', fontsize=9, framealpha=0.9)
     ax5.grid(True, alpha=0.3)
 
-    # 6. Average Reward Over Time
+    # 6. Average reward
     ax6 = fig.add_subplot(gs[1, 2])
-
-    ax6.plot(slots_smooth, result.rewards, linewidth=2, color='darkgreen', alpha=0.8)
+    ax6.plot(slots, result.rewards, linewidth=2, color='darkgreen', alpha=0.8)
     ax6.set_xlabel('Slot', fontsize=10)
     ax6.set_ylabel('Average Reward', fontsize=10)
     ax6.set_title('Average Reward Per Builder', fontsize=11, fontweight='bold')
     ax6.grid(True, alpha=0.3)
 
-    # Row 3: New Metrics
-    # 7. HHI Metrics Over Time
+    # Row 3
+    # 7. HHI: location + utility on same panel
     ax7 = fig.add_subplot(gs[2, 0])
-
-    ax7.plot(slots_smooth, result.builder_dist_hhi_over_time, label='Population Distribution', linewidth=2, alpha=0.8)
+    ax7.plot(slots, result.location_hhi_over_time,
+             label='Location', linewidth=2, alpha=0.9, color='steelblue')
+    ax7.plot(slots, result.utility_hhi_over_time,
+             label='Utility', linewidth=1.5, alpha=0.7, color='darkorange', linestyle='--')
     ax7.set_xlabel('Slot', fontsize=10)
     ax7.set_ylabel('HHI', fontsize=10)
     ax7.set_title('HHI (Concentration) Over Time', fontsize=11, fontweight='bold')
@@ -254,34 +260,35 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
 
     # 8. Value-Capture Concentration
     ax8 = fig.add_subplot(gs[2, 1])
-
-    ax8.plot(slots_smooth, result.value_share_hhi_over_time, label='HHI', linewidth=2, alpha=0.8, color='darkred')
-    ax8.plot(slots_smooth, result.value_share_top1_over_time, label='Top-1', linewidth=2, alpha=0.8, color='orange')
-    ax8.plot(slots_smooth, result.value_share_top3_over_time, label='Top-3', linewidth=2, alpha=0.8, color='gold')
+    ax8.plot(slots, result.value_share_hhi_over_time,  label='HHI',   linewidth=2, alpha=0.8, color='darkred')
+    ax8.plot(slots, result.value_share_top1_over_time, label='Top-1', linewidth=2, alpha=0.8, color='orange')
+    ax8.plot(slots, result.value_share_top3_over_time, label='Top-3', linewidth=2, alpha=0.8, color='gold')
     ax8.set_xlabel('Slot', fontsize=10)
     ax8.set_ylabel('Concentration', fontsize=10)
     ax8.set_title('Value-Capture Concentration', fontsize=11, fontweight='bold')
     ax8.legend(loc='best', fontsize=9, framealpha=0.9)
     ax8.grid(True, alpha=0.3)
 
-    # 9. Volatility (L1 Change) Metrics
+    # 9. Volatility
     ax9 = fig.add_subplot(gs[2, 2])
-
-    ax9.plot(slots_smooth, result.builder_dist_volatility_over_time, label='Population Distribution', linewidth=2, alpha=0.8)
-    ax9.plot(slots_smooth, result.value_share_volatility_over_time, label='Value-Capture', linewidth=2, alpha=0.8)
+    ax9.plot(slots, result.builder_dist_volatility_over_time,
+             label='Location Distribution', linewidth=2, alpha=0.8)
+    ax9.plot(slots, result.value_share_volatility_over_time,
+             label='Value-Capture', linewidth=2, alpha=0.8)
     ax9.set_xlabel('Slot', fontsize=10)
     ax9.set_ylabel('L1 Change', fontsize=10)
     ax9.set_title('Volatility (Distribution Churn) Over Time', fontsize=11, fontweight='bold')
     ax9.legend(loc='best', fontsize=9, framealpha=0.9)
     ax9.grid(True, alpha=0.3)
 
-    # 10. Welfare Over Time (full-width bottom row)
+    # Row 4
+    # 10. Welfare (full-width)
     ax10 = fig.add_subplot(gs[3, :])
-
     slots_welfare = np.arange(len(result.welfare_history))
     ax10.plot(slots_welfare, result.welfare_history, linewidth=2, color='steelblue', alpha=0.9, label='Welfare')
     mean_w = result.stats['mean_welfare']
-    ax10.axhline(y=mean_w, color='green', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Mean welfare = {mean_w:.2f}')
+    ax10.axhline(y=mean_w, color='green', linestyle='--', linewidth=1.5, alpha=0.8,
+                 label=f'Mean welfare = {mean_w:.2f}')
     ax10.set_xlabel('Slot', fontsize=10)
     ax10.set_ylabel('Total Welfare', fontsize=10)
     ax10.set_title(
@@ -334,12 +341,12 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
     region_radius = 0.4
     for i, (x, name) in enumerate(zip(region_positions, region_names)):
         circle = plt.Circle((x, region_y), region_radius, color='lightblue',
-                           ec='darkblue', linewidth=2, alpha=0.7, zorder=2)
+                             ec='darkblue', linewidth=2, alpha=0.7, zorder=2)
         ax.add_patch(circle)
         ax.text(x, region_y, f"{i}", ha='center', va='center',
-               fontsize=14, fontweight='bold', zorder=3)
+                fontsize=14, fontweight='bold', zorder=3)
         ax.text(x, region_y - 0.8, name, ha='center', va='top',
-               fontsize=11, fontweight='bold')
+                fontsize=11, fontweight='bold')
 
     # Draw sources at their initial regions
     source_y = 7.5  # Y position for sources (above regions)
@@ -350,19 +357,19 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
             src_x = region_positions[region]
 
             circle = plt.Circle((src_x, source_y), source_radius, color='gold',
-                              ec='darkorange', linewidth=2.5, alpha=0.9, zorder=2)
+                                 ec='darkorange', linewidth=2.5, alpha=0.9, zorder=2)
             ax.add_patch(circle)
 
             ax.text(src_x, source_y, "S", ha='center', va='center',
-                   fontsize=12, fontweight='bold', zorder=3)
+                    fontsize=12, fontweight='bold', zorder=3)
             ax.text(src_x, source_y + 0.6, f"{src_name}", ha='center', va='bottom',
-                   fontsize=10, fontweight='bold', color='darkorange')
+                    fontsize=10, fontweight='bold', color='darkorange')
             ax.text(src_x, source_y + 0.9, f"λ={lambda_rate}", ha='center', va='bottom',
-                   fontsize=9, color='darkred')
+                    fontsize=9, color='darkred')
 
             ax.annotate('', xy=(src_x, region_y + region_radius),
-                       xytext=(src_x, source_y - source_radius),
-                       arrowprops=dict(arrowstyle='->', lw=1.5, color='gray', alpha=0.6))
+                        xytext=(src_x, source_y - source_radius),
+                        arrowprops=dict(arrowstyle='->', lw=1.5, color='gray', alpha=0.6))
 
     # Draw distance indicators between adjacent regions
     distance_y = 3.5  # Y position for distance labels
@@ -373,11 +380,11 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
         # Draw line showing distance
         ax.plot([x1 + region_radius, x2 - region_radius],
                [distance_y, distance_y],
-               'k-', linewidth=1, alpha=0.3)
+                'k-', linewidth=1, alpha=0.3)
 
         # Distance label
         ax.text(mid_x, distance_y - 0.3, f"d={1}", ha='center', va='top',
-               fontsize=9, style='italic', color='gray')
+                fontsize=9, style='italic', color='gray')
 
     # Add legend/info box
     info_text = (
@@ -389,8 +396,8 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
     )
 
     ax.text(0.5, 0.08, info_text, transform=ax.transAxes,
-           fontsize=10, verticalalignment='top', horizontalalignment='center',
-           bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+            fontsize=10, verticalalignment='top', horizontalalignment='center',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
 
     # Add legend at bottom left, next to config box
     legend_text = (
@@ -400,8 +407,8 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
         "d = distance units between regions"
     )
     ax.text(0.02, 0.08, legend_text, transform=ax.transAxes,
-           fontsize=9, verticalalignment='top', horizontalalignment='left',
-           bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.3))
+            fontsize=9, verticalalignment='top', horizontalalignment='left',
+            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.3))
 
     # Set axis properties
     ax.set_xlim(-1, 11)
@@ -412,7 +419,7 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
     # Title
     policy_info = config.policy_type if hasattr(config, 'policy_type') else "N/A"
     ax.set_title(f'Network Setup: {config.name} | Policy: {policy_info}',
-                fontsize=14, fontweight='bold', pad=20)
+                 fontsize=14, fontweight='bold', pad=20)
 
     plt.tight_layout()
 
@@ -427,23 +434,34 @@ def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
 
 
 def print_comparison_table(results: List[ExperimentResult]):
-    """Print a comparison table of final metrics."""
-    print(f"\n{'='*107}")
-    print("EXPERIMENT COMPARISON TABLE")
-    print(f"{'='*107}")
+    """Print a comparison table of final metrics across experiments."""
+    col_w = 12
+    header_cols = ['Experiment', 'Policy', 'Reward', 'Welfare',
+                   'Loc.Gini', 'Loc.Entr', 'Loc.HHI',
+                   'Util.Gini', 'Util.Entr', 'Util.HHI',
+                   'Coverage']
+    widths = [25, 8] + [col_w] * (len(header_cols) - 2)
+    total_width = sum(widths) + len(widths) - 1
 
-    # Header
-    print(f"\n{'Experiment':<25} {'Policy':<8} {'Reward':<12} {'Welfare':<12} "
-          f"{'BuilderDist':<12} {'BuilderDist':<12} {'BuilderDist':<12} {'Coverage':<12}")
-    print(f"{'':25} {'':8} {'':12} {'Mean':<12} "
-          f"{'Gini':<12} {'Entropy':<12} {'HHI':<12} {'Ratio':<12}")
-    print("-" * 107)
+    print(f"\n{'='*total_width}")
+    print("EXPERIMENT COMPARISON TABLE")
+    print(f"{'='*total_width}")
+    header = (f"{'Experiment':<25} {'Policy':<8} "
+              f"{'Reward':<{col_w}} {'Welfare':<{col_w}} "
+              f"{'Loc.Gini':<{col_w}} {'Loc.Entr':<{col_w}} {'Loc.HHI':<{col_w}} "
+              f"{'Util.Gini':<{col_w}} {'Util.Entr':<{col_w}} {'Util.HHI':<{col_w}} "
+              f"{'Coverage':<{col_w}}")
+    print(header)
+    print("-" * total_width)
 
     for result in results:
-        stats = result.stats
-        print(f"{result.config.name:<25} {result.config.policy_type:<8} "
-              f"{stats['avg_reward']:<12.4f} {stats['mean_welfare']:<12.4f} "
-              f"{stats['builder_dist_gini']:<12.4f} {stats['builder_dist_entropy']:<12.4f} "
-              f"{stats['builder_dist_hhi']:<12.4f} {stats['mean_coverage_ratio']:<12.4f}")
+        s = result.stats
+        print(
+            f"{result.config.name:<25} {result.config.policy_type:<8} "
+            f"{s['avg_reward']:<{col_w}.4f} {s['mean_welfare']:<{col_w}.4f} "
+            f"{s['location_gini']:<{col_w}.4f} {s['location_entropy']:<{col_w}.4f} {s['location_hhi']:<{col_w}.4f} "
+            f"{s['utility_gini']:<{col_w}.4f} {s['utility_entropy']:<{col_w}.4f} {s['utility_hhi']:<{col_w}.4f} "
+            f"{s['mean_coverage_ratio']:<{col_w}.4f}"
+        )
 
-    print("="*107)
+    print("=" * total_width)

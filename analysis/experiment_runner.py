@@ -203,7 +203,10 @@ def print_results(result: ExperimentResult, regions: List[Region], sources: List
     for i, count in enumerate(stats['avg_region_counts']):
         print(f"  {regions[i].name}: {count:.2f}")
 
-    print(f"\nDiversity metrics:")
-    print(f"  Builder Dist Gini: {stats['builder_dist_gini']:.4f}")
-    print(f"  Builder Dist Entropy: {stats['builder_dist_entropy']:.4f}")
-    print(f"  Builder Dist HHI: {stats['builder_dist_hhi']:.4f}")
+    print(f"\nConcentration metrics (converged profile):")
+    print(f"  Location Gini: {stats['location_gini']:.4f}")
+    print(f"  Location Entropy: {stats['location_entropy']:.4f}")
+    print(f"  Location HHI: {stats['location_hhi']:.4f}")
+    print(f"  Utility Gini: {stats['utility_gini']:.4f}")
+    print(f"  Utility Entropy: {stats['utility_entropy']:.4f}")
+    print(f"  Utility HHI: {stats['utility_hhi']:.4f}")

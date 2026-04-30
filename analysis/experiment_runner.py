@@ -7,7 +7,7 @@ from analysis.result import ExperimentResult
 from analysis.poa import compute_poa_stats
 from sim.simulator import (
     Region, Source, Builder, LocationGamesSimulator,
-    EMASoftmaxPolicy, UCBPolicy, FixedPolicy, StochasticTransactionGenerator,
+    EMASoftmaxPolicy, UCBPolicy, FixedPolicy, HedgePolicy, EXP3Policy, StochasticTransactionGenerator,
     LatencyPropagationModel, FixedLatencyPropagationModel, EqualSplitSharingRule,
 )
 
@@ -97,6 +97,24 @@ def _run_single(config: ExperimentConfig, seed: int,
             )
         elif config.policy_type == "UCB":
             policy = UCBPolicy(config.n_regions, alpha=config.alpha, initial_belief=initial_belief)
+        elif config.policy_type == "Hedge":
+            policy = HedgePolicy(
+                config.n_regions,
+                eta=config.eta,
+                initial_belief=initial_belief,
+            )
+        elif config.policy_type == "EXP3":
+            policy = EXP3Policy(
+                config.n_regions,
+                eta=config.eta,
+                gamma=config.gamma,
+                initial_belief=initial_belief,
+                gamma_schedule=config.gamma_schedule,
+                gamma_min=config.gamma_min,
+                gamma_decay=config.gamma_decay,
+                total_slots=config.n_slots,
+                norm_alpha=config.norm_alpha,
+            )
         elif config.policy_type == "ABR":
             policy = FixedPolicy(config.n_regions)
         else:
@@ -121,6 +139,8 @@ def _run_single(config: ExperimentConfig, seed: int,
     )
     if config.policy_type == "ABR":
         sim.run_abr(config.n_slots, n_t=config.n_t)
+    elif config.policy_type == "Hedge":
+        sim.run_hedge(config.n_slots, n_t=config.n_t)
     else:
         sim.run(config.n_slots)
     result = ExperimentResult(config, sim)

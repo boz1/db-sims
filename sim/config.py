@@ -46,6 +46,13 @@ class ExperimentConfig:
     # UCB policy parameters
     alpha: float = 2.0
 
+    # EXP3 policy parameters
+    gamma: float = 0.05 # uniform exploration mixing parameter
+    gamma_schedule: str = "static" # "static" | "exponential" | "sqrt_decay" | "linear"
+    gamma_min: float = 0.01 # exploration floor for decaying schedules
+    gamma_decay: float = 0.0002  # rate constant for exponential schedule
+    norm_alpha: float = 0.0  # EMA rate for adaptive normalisation (0 = disabled)
+
     # ABR policy parameters
     n_t: int = 100  # number of time discretisation points for the analytical integral
 
@@ -151,6 +158,11 @@ def load_config(path) -> ExperimentConfig:
         beta_reg=pol.get("beta_reg", 1.5),
         cost_c=pol.get("cost_c", 0.0),
         alpha=pol.get("alpha", 2.0),
+        gamma=pol.get("gamma", 0.05),
+        gamma_schedule=pol.get("gamma_schedule", "static"),
+        gamma_min=pol.get("gamma_min", 0.01),
+        gamma_decay=pol.get("gamma_decay", 0.0002),
+        norm_alpha=pol.get("norm_alpha", 0.0),
         n_t=pol.get("n_t", 100),
         initial_placement=sim.get("initial_placement", "dispersed"),
     )

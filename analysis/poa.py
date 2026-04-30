@@ -84,47 +84,79 @@ def _make_prop_model(config: ExperimentConfig, latency_mean, latency_std) -> Pro
         return FixedLatencyPropagationModel(latency_mean)
     return LatencyPropagationModel(latency_mean, latency_std)
 
+def optimal_welfare_brute_force(
+    K: int,
+    n_regions: int,
+    sources,
+    propagation_model: PropagationModel,
+    delta: float,
+    n_time_steps: int = 200,
+    verbose: bool = False,
+) -> tuple:
+    """Exact optimal welfare via exhaustive search over multisets of size K
+    over n_regions. Scales as C(R+K-1, K) evaluations."""
+    best_welfare, best_profile = -np.inf, None
+    best_profiles = []
+    for profile in combinations_with_replacement(range(n_regions), K):
+        w = _compute_welfare_analytical(list(profile), sources, propagation_model, delta, n_time_steps)
+        if w > best_welfare:
+            best_welfare, best_profile = w, list(profile)
+            best_profiles = []
+        if w == best_welfare:
+            best_profiles.append(list(profile))
+
+    if verbose:
+        print(f"Optimal welfare: {best_welfare:.4f} achieved by {len(best_profiles)} profiles")
+
+    return best_welfare, best_profile
+
+
+def optimal_welfare_greedy(
+    K: int,
+    n_regions: int,
+    sources,
+    propagation_model: PropagationModel,
+    delta: float,
+    n_time_steps: int = 200,
+) -> tuple:
+    """(1 - 1/e)-approximate optimal welfare via greedy.
+    Runs K * n_regions evaluations."""
+    profile = []
+    for _ in range(K):
+        best_w, best_r = -np.inf, 0
+        for r in range(n_regions):
+            candidate = profile + [r]
+            w = _compute_welfare_analytical(candidate, sources, propagation_model, delta, n_time_steps)
+            if w > best_w:
+                best_w, best_r = w, r
+        profile.append(best_r)
+
+    final_welfare = _compute_welfare_analytical(profile, sources, propagation_model, delta, n_time_steps)
+    return final_welfare, profile
+
 
 def compute_optimal_welfare_brute_force(
     config: ExperimentConfig,
     n_time_steps: int = 200,
 ) -> tuple:
-    """Exact optimal welfare via exhaustive search over all builder multisets.
-    Scales as C(R+K-1, K) evaluations. Feasible for small R or K"""
     _, sources, latency_mean, latency_std = create_scenario_from_config(config)
     prop_model = _make_prop_model(config, latency_mean, latency_std)
-
-    best_welfare, best_profile = -np.inf, None
-    for profile in combinations_with_replacement(range(config.n_regions), config.n_builders):
-        w = _compute_welfare_analytical(list(profile), sources, prop_model, config.delta, n_time_steps)
-        if w > best_welfare:
-            best_welfare, best_profile = w, list(profile)
-
-    return best_welfare, best_profile
+    return optimal_welfare_brute_force(
+        config.n_builders, config.n_regions, sources, prop_model,
+        config.delta, n_time_steps, verbose=True,
+    )
 
 
 def compute_optimal_welfare_greedy(
     config: ExperimentConfig,
     n_time_steps: int = 200,
 ) -> tuple:
-    """(1-1/e)-approximate optimal welfare via greedy + analytical welfare.
-    Runs K*R evaluations."""
     _, sources, latency_mean, latency_std = create_scenario_from_config(config)
     prop_model = _make_prop_model(config, latency_mean, latency_std)
-
-    profile = []
-    for _ in range(config.n_builders):
-        best_w, best_r = -np.inf, 0
-        for r in range(config.n_regions):
-            candidate = profile + [r]
-            w = _compute_welfare_analytical(candidate, sources, prop_model, config.delta, n_time_steps)
-            if w > best_w:
-                best_w, best_r = w, r
-        profile.append(best_r)
-
-    final_welfare = _compute_welfare_analytical(profile, sources, prop_model, config.delta, n_time_steps)
-    return final_welfare, profile
-
+    return optimal_welfare_greedy(
+        config.n_builders, config.n_regions, sources, prop_model,
+        config.delta, n_time_steps,
+    )
 
 def compute_poa_stats(
     result: ExperimentResult,

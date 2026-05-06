@@ -13,7 +13,7 @@ from collections import defaultdict
 
 import numpy as np
 from scipy.stats import norm
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from sim.metrics import gini, entropy, hhi
@@ -166,37 +166,6 @@ class FixedPolicy(LearningPolicy):
 
     def get_name(self) -> str:
         return "Fixed"
-
-
-class HedgePolicy(LearningPolicy):
-    """
-    Exponential-weights (Hedge) with full-information analytical counterfactuals.
-    Must be used with run_round_hedge which supplies reward_vector.
-    Converges to CCE in time-average play for potential games.
-    """
-    def __init__(self, n_regions: int, eta: float = 0.02, initial_belief: float = 1.0):
-        super().__init__(n_regions, initial_belief)
-        self.eta = eta
-        self._norm = max(initial_belief, 1e-10)
-        self.weights = np.ones(n_regions)
-
-    def choose(self, current_region: int) -> int:
-        p = self.weights / self.weights.sum()
-        return int(np.random.choice(len(p), p=p))
-
-    def update(self, region_id: int, reward: float,
-               reward_vector: Optional[np.ndarray] = None):
-        if reward_vector is None:
-            raise ValueError(
-                "HedgePolicy.update requires reward_vector; route through run_round_hedge"
-            )
-        gains = reward_vector / self._norm
-        self.weights *= np.exp(self.eta * gains)
-        self.weights /= self.weights.max() # prevent overflow; keeps max weight = 1
-        self.beliefs = reward_vector.copy()  # store for external tracking
-
-    def get_name(self) -> str:
-        return "Hedge"
 
 
 class EXP3Policy(LearningPolicy):
@@ -432,73 +401,6 @@ def compute_expected_reward(
     return total
 
 
-def precompute_sharing_weights_mixed(
-    other_strategies: List[np.ndarray],
-    sources: List[Source],
-    propagation_model: PropagationModel,
-    delta: float,
-    n_t: int = 200,
-) -> np.ndarray:
-    """
-    Precompute E[1 / (1+X_{I,t})] when other builders play mixed strategies.
-    For builder b with strategy p_b, their effective reception probability is
-        q_b(s, t) = p_b @ reception_prob(., s, t)
-    The Poisson-Binomial DP then runs identically over these effective probabilities.
-    """
-    n_other = len(other_strategies)
-    n_regions = len(other_strategies[0]) if n_other > 0 else 0
-    remaining = delta - np.linspace(0, delta, n_t, endpoint=False)
-    weights = np.zeros((len(sources), n_t))
-
-    for i, source in enumerate(sources):
-        # Q[r, n] = reception_prob(r, source, remaining[n])
-        Q = np.array([
-            [propagation_model.reception_prob(r, source.id, rem) for rem in remaining]
-            for r in range(n_regions)
-        ])
-        # probs[b, :] = p_b @ Q
-        probs = np.array([strat @ Q for strat in other_strategies])
-
-        for n in range(n_t):
-            pmf = np.array([1.0])
-            for b in range(n_other):
-                prob = probs[b, n]
-                new_pmf = np.zeros(len(pmf) + 1)
-                new_pmf[:-1] += pmf * (1.0 - prob)
-                new_pmf[1:] += pmf * prob
-                pmf = new_pmf
-            total_builders = np.arange(1, len(pmf) + 1)
-            weights[i, n] = float(np.sum(pmf / total_builders))
-    return weights
-
-
-def compute_expected_welfare(
-    all_strategies: List[np.ndarray],
-    sources: List[Source],
-    propagation_model: PropagationModel,
-    delta: float,
-    n_t: int = 100,
-) -> float:
-    """
-    Expected total welfare under mixed strategy profile p(t).
-    W(p) = sum_I lambda_I * E[val_I] * delta * mean_t[1 - prod_b(1 - q_b^I(t))]
-    where q_b^I(t) = p_b @ reception_prob(., I, t).
-    """
-    n_regions = len(all_strategies[0])
-    remaining = delta - np.linspace(0, delta, n_t, endpoint=False)
-    total = 0.0
-    for source in sources:
-        ev = np.exp(source.mu_val + 0.5 * source.sigma_val ** 2)
-        Q = np.array([
-            [propagation_model.reception_prob(r, source.id, rem) for rem in remaining]
-            for r in range(n_regions)
-        ])  # (n_regions, n_t)
-        q = np.array([strat @ Q for strat in all_strategies])  # (K, n_t)
-        f = 1.0 - np.prod(1.0 - q, axis=0)  # P(at least one builder receives)
-        total += source.lambda_rate * ev * delta * float(np.mean(f))
-    return total
-
-
 def compute_all_builder_utilities(
     profile: List[int],
     sources: List[Source],
@@ -577,7 +479,6 @@ class LocationGamesSimulator:
         self.region_counts_history: List[np.ndarray] = []
         self.reward_history: List[List[float]] = []
         self.welfare_history: List[float] = []
-        self.expected_welfare_history: List[float] = []
         self.builder_distribution_history: List[np.ndarray] = []
         self.region_reward_pairs_history: List[List[tuple]] = []
         self.tx_emitted_history: List[int] = []
@@ -700,81 +601,6 @@ class LocationGamesSimulator:
         """Run asynchronous better response dynamics for n_slots rounds."""
         for i in range(n_slots):
             self.run_round_abr(i, n_t)
-
-    def run_round_hedge(self, n_t: int):
-        """
-        One round of Hedge dynamics. Counterfactuals are computed analytically under
-        the current mixed strategy profile. Stores both realised welfare and expected 
-        welfare under the mixed profile.
-        """
-        for b in self.builders:
-            if not isinstance(b.policy, HedgePolicy):
-                raise TypeError(
-                    f"run_hedge requires HedgePolicy on all builders, got {type(b.policy)}"
-                )
-
-        # Snapshot mixed strategies before update (welfare of this round's play)
-        strategies = [b.policy.weights / b.policy.weights.sum() for b in self.builders]
-
-        builder_selected_regions = {b.id: b.choose_region() for b in self.builders}
-
-        tx_receivers: Dict[int, List[int]] = defaultdict(list)
-        tx_values: Dict[int, float] = {}
-        tx_emitted_counter = tx_received_counter = 0
-        for source in self.sources:
-            for tx in self.tx_generator.generate(source, self.delta):
-                receivers = [builder.id for builder in self.builders if
-                             self.propagation_model.receives(
-                                 builder_selected_regions[builder.id], source.id, tx, self.delta)]
-                if receivers:
-                    tx_receivers[tx_received_counter] = receivers
-                    tx_values[tx_received_counter] = tx.value
-                    tx_received_counter += 1
-                tx_emitted_counter += 1
-        rewards = self.sharing_rule.compute_rewards(tx_values=tx_values, tx_receivers=tx_receivers)
-
-        # Analytical counterfactuals under mixed strategy profile
-        for i, builder in enumerate(self.builders):
-            other_strategies = [strategies[j] for j in range(self.n_builders) if j != i]
-            sharing_weights = precompute_sharing_weights_mixed(
-                other_strategies, self.sources, self.propagation_model, self.delta, n_t
-            )
-            reward_vector = np.array([
-                compute_expected_reward(r, sharing_weights, self.sources,
-                                        self.propagation_model, self.delta, n_t)
-                for r in range(self.n_regions)
-            ])
-            builder.policy.update(
-                builder_selected_regions[builder.id],
-                rewards.get(builder.id, 0.0),
-                reward_vector=reward_vector,
-            )
-
-        # Analytical expected welfare under the strategies that played this round
-        expected_welfare = compute_expected_welfare(
-            strategies, self.sources, self.propagation_model, self.delta, n_t
-        )
-
-        # History tracking
-        region_counts = np.zeros(self.n_regions)
-        for region_id in builder_selected_regions.values():
-            region_counts[region_id] += 1
-        slot_rewards = [rewards.get(builder.id, 0.0) for builder in self.builders]
-        self.region_counts_history.append(region_counts)
-        self.reward_history.append(slot_rewards)
-        self.welfare_history.append(float(sum(slot_rewards)))
-        self.expected_welfare_history.append(expected_welfare)
-        self.builder_distribution_history.append(self._get_builder_distribution())
-        self.region_reward_pairs_history.append([
-            (builder_selected_regions[builder.id], rewards.get(builder.id, 0.0)) for builder in self.builders
-        ])
-        self.tx_emitted_history.append(tx_emitted_counter)
-        self.tx_received_history.append(tx_received_counter)
-
-    def run_hedge(self, n_slots: int, n_t: int = 100):
-        """Run Hedge dynamics for n_slots rounds."""
-        for _ in range(n_slots):
-            self.run_round_hedge(n_t)
 
     def get_statistics(self) -> Dict:
         """Compute summary statistics."""

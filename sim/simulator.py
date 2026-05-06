@@ -564,15 +564,10 @@ class LocationGamesSimulator:
         for _ in range(n_slots):
             self.run_round()
 
-    def run_round_abr(self, round_index: int, n_t: int):
-        """
-        One round of asynchronous better response dynamics.
-        A single builder is selected by round robin. It evaluates all regions
-        analytically and migrates to the first one (in random order) that strictly
-        improves its expected reward. All builders then compete from their current
-        locations and rewards are recorded.
-        """
+    def _step_abr(self, round_index: int, n_t: int) -> bool:
+        """Analytical migration for one builder (round robin). Returns True if it moved."""
         active = self.builders[round_index % self.n_builders]
+        old_region = active.current_region
         other_builder_regions = [builder.current_region for builder in self.builders if builder.id != active.id]
 
         sharing_weights = precompute_sharing_weights(
@@ -594,8 +589,44 @@ class LocationGamesSimulator:
                 active.set_region(region)
                 break
 
-        # Simulate the round at current locations and record history
+        return active.current_region != old_region
+
+    def run_round_abr(self, round_index: int, n_t: int) -> bool:
+        """
+        One round of asynchronous better response dynamics.
+        A single builder is selected by round robin. It evaluates all regions
+        analytically and migrates to the first one (in random order) that strictly
+        improves its expected reward. All builders then compete from their current
+        locations and rewards are recorded. Returns True if the builder migrated.
+        """
+        migrated = self._step_abr(round_index, n_t)
         self.run_round()
+        return migrated
+
+    def run_abr_until_convergence(self, n_t: int = 100, max_rounds: int = 5000,
+                                   convergence_sweeps: int = None) -> int:
+        """Run ABR until no builder migrates for `convergence_sweeps` consecutive full sweeps.
+        Does not record stochastic transaction history and only updates builder positions.
+        Returns total migration steps taken."""
+        K = self.n_builders
+        convergence_sweeps = convergence_sweeps or K
+        no_move_count = 0
+        total_rounds = 0
+        sweep = 0
+        while total_rounds < max_rounds:
+            any_move = False
+            for k in range(K):
+                if self._step_abr(sweep * K + k, n_t):
+                    any_move = True
+                total_rounds += 1
+            sweep += 1
+            if any_move:
+                no_move_count = 0
+            else:
+                no_move_count += 1
+                if no_move_count >= convergence_sweeps:
+                    break
+        return total_rounds
 
     def run_abr(self, n_slots: int, n_t: int = 100):
         """Run asynchronous better response dynamics for n_slots rounds."""

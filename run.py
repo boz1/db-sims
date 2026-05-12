@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from analysis.experiment_runner import run_experiment
 from sim.config import load_config
-from analysis.plotting import compare_experiments, print_comparison_table, plot_experiment_details, plot_network_setup
+from analysis.plotting import compare_experiments, print_comparison_table, plot_experiment_details
 
 
 def main():
@@ -49,11 +49,9 @@ def main():
           f"{len(configs[0].sources_config)} sources")
     print(f"Running {len(configs)} experiment(s) * {configs[0].n_slots} slots\n")
 
-    plot_network_setup(configs[0], save_plots=True)
-
     results = []
     for config in configs:
-        result = run_experiment(config, verbose=True, compute_poa=args.poa, poa_method=args.poa_method)
+        result = run_experiment(config, verbose=False, compute_poa=args.poa, poa_method=args.poa_method)
         results.append(result)
 
     print_comparison_table(results)

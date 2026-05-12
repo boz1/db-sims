@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from sim.config import ExperimentConfig
 from analysis.result import ExperimentResult
 
 def compare_experiments(results: List[ExperimentResult],
@@ -316,119 +315,6 @@ def plot_experiment_details(result: ExperimentResult, save_plots: bool = True):
         filename = results_dir / f"{result.config.name}_details.png"
         plt.savefig(filename, dpi=150, bbox_inches='tight')
         print(f"Detail plot saved to: {filename}")
-
-    plt.close(fig)
-
-
-def plot_network_setup(config: ExperimentConfig, save_plots: bool = True):
-    """
-    Visualize the initial network setup showing regions, sources, and topology.
-
-    Args:
-        config: ExperimentConfig object
-        save_plots: Whether to save the plot to disk
-    """
-    fig, ax = plt.subplots(figsize=(16, 8))
-
-    n_regions = config.n_regions
-    region_names = config.region_names if config.region_names else [f"R{i}" for i in range(n_regions)]
-
-    # Position regions horizontally (equally spaced)
-    region_positions = np.linspace(0, 10, n_regions)
-    region_y = 5  # Y position for regions
-
-    # Draw regions as circles
-    region_radius = 0.4
-    for i, (x, name) in enumerate(zip(region_positions, region_names)):
-        circle = plt.Circle((x, region_y), region_radius, color='lightblue',
-                             ec='darkblue', linewidth=2, alpha=0.7, zorder=2)
-        ax.add_patch(circle)
-        ax.text(x, region_y, f"{i}", ha='center', va='center',
-                fontsize=14, fontweight='bold', zorder=3)
-        ax.text(x, region_y - 0.8, name, ha='center', va='top',
-                fontsize=11, fontweight='bold')
-
-    # Draw sources at their initial regions
-    source_y = 7.5  # Y position for sources (above regions)
-    source_radius = 0.35
-
-    if config.sources_config:
-        for src_name, region, lambda_rate, mu_val, sigma_val in config.sources_config:
-            src_x = region_positions[region]
-
-            circle = plt.Circle((src_x, source_y), source_radius, color='gold',
-                                 ec='darkorange', linewidth=2.5, alpha=0.9, zorder=2)
-            ax.add_patch(circle)
-
-            ax.text(src_x, source_y, "S", ha='center', va='center',
-                    fontsize=12, fontweight='bold', zorder=3)
-            ax.text(src_x, source_y + 0.6, f"{src_name}", ha='center', va='bottom',
-                    fontsize=10, fontweight='bold', color='darkorange')
-            ax.text(src_x, source_y + 0.9, f"λ={lambda_rate}", ha='center', va='bottom',
-                    fontsize=9, color='darkred')
-
-            ax.annotate('', xy=(src_x, region_y + region_radius),
-                        xytext=(src_x, source_y - source_radius),
-                        arrowprops=dict(arrowstyle='->', lw=1.5, color='gray', alpha=0.6))
-
-    # Draw distance indicators between adjacent regions
-    distance_y = 3.5  # Y position for distance labels
-    for i in range(n_regions - 1):
-        x1, x2 = region_positions[i], region_positions[i + 1]
-        mid_x = (x1 + x2) / 2
-
-        # Draw line showing distance
-        ax.plot([x1 + region_radius, x2 - region_radius],
-               [distance_y, distance_y],
-                'k-', linewidth=1, alpha=0.3)
-
-        # Distance label
-        ax.text(mid_x, distance_y - 0.3, f"d={1}", ha='center', va='top',
-                fontsize=9, style='italic', color='gray')
-
-    # Add legend/info box
-    info_text = (
-        f"Configuration: {config.name}\n"
-        f"Regions: {n_regions}  |  Sources: {len(config.sources_config) if config.sources_config else 0}  |  "
-        f"Builders: {config.n_builders}  |  Delta: {config.delta}s\n"
-        f"Equal-split sharing  |  Migration cost: c={config.cost_c if hasattr(config, 'cost_c') else 'N/A'}\n"
-        f"Initial distribution: Uniform ({config.n_builders // n_regions} builders per region)"
-    )
-
-    ax.text(0.5, 0.08, info_text, transform=ax.transAxes,
-            fontsize=10, verticalalignment='top', horizontalalignment='center',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
-
-    # Add legend at bottom left, next to config box
-    legend_text = (
-        "Legend:\n"
-        "● Region (numbered by ID)\n"
-        "● Information Source (with value V)\n"
-        "d = distance units between regions"
-    )
-    ax.text(0.02, 0.08, legend_text, transform=ax.transAxes,
-            fontsize=9, verticalalignment='top', horizontalalignment='left',
-            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.3))
-
-    # Set axis properties
-    ax.set_xlim(-1, 11)
-    ax.set_ylim(2, 9)
-    ax.set_aspect('equal')
-    ax.axis('off')
-
-    # Title
-    policy_info = config.policy_type if hasattr(config, 'policy_type') else "N/A"
-    ax.set_title(f'Network Setup: {config.name} | Policy: {policy_info}',
-                 fontsize=14, fontweight='bold', pad=20)
-
-    plt.tight_layout()
-
-    if save_plots:
-        results_dir = Path(config.results_dir if hasattr(config, 'results_dir') else 'results')
-        results_dir.mkdir(exist_ok=True)
-        filename = results_dir / f"{config.name}_network_setup.png"
-        plt.savefig(filename, dpi=150, bbox_inches='tight')
-        print(f"Network setup plot saved to: {filename}")
 
     plt.close(fig)
 

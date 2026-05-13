@@ -52,8 +52,9 @@ The `scripts/` directory contains experiment scripts that sweep over key paramet
 |---|---|
 | `exp1_value_asymmetry.py` | Sweeps value ratio (high-value / peripheral information sources); measures welfare, welfare ratio, geographic HHI, utility HHI, and cluster coverage |
 | `exp2_builder_count.py` | Sweeps builder count K; measures welfare ratio, geographic HHI, utility HHI, cluster coverage, and mean pairwise distance |
-| `exp3_heatmaps.py` | Heatmaps over (value ratio × delta); welfare ratio, geographic HHI, utility HHI, mean pairwise distance, and cluster coverage |
+| `exp3_value_asymmetry_vs_slot_duration.py` | Heatmaps over (value ratio × delta); welfare ratio, geographic HHI, utility HHI, mean pairwise distance, and cluster coverage |
 | `exp4_slot_duration.py` | Sweeps slot duration delta (10ms–12s) at fixed value ratio 10x; same metrics as exp1 |
+| `exp5_builders_vs_slot_duration.py` | Heatmaps over (builder count K × delta) at fixed value ratio; same metrics as exp3 |
 
 All scripts use ABR with GCP empirical latency data and randomized information source layouts, reporting median + IQR over multiple instances and seeds.
 
@@ -71,7 +72,7 @@ All scripts use ABR with GCP empirical latency data and randomized information s
 
 ## Metrics
 
-**ABR experiment scripts (exp1–4):**
+**ABR experiment scripts (exp1–5):**
 - **Price of Anarchy**: W* / W_ABR (≥ 1; 1 = socially optimal), where W* is the welfare-maximizing planner allocation and W_ABR is the welfare at the ABR-converged profile
 - **Geographic / utility HHI**: builder concentration across regions and payoff inequality
 - **Cluster coverage**: fraction of expected value captured from each information source cluster
@@ -94,7 +95,7 @@ analysis/
   result.py            - ExperimentResult
   plotting.py          - comparison and detail plots
   poa.py               - Price of Anarchy computation
-scripts/               - experiment scripts (exp1–exp4, ...)
+scripts/               - experiment scripts (exp1–exp5, ...)
 configs/               - YAML experiment configs
 run.py                 - CLI entrypoint
 ```

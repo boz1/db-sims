@@ -36,13 +36,14 @@ REGIONS_EXP3 = list(REGIONS_DEFAULT) + ["europe-west2", "asia-northeast2", "asia
 
 # Experiment parameters
 MASTER_SEED = 1234
-K = 8
+K = 5
 TOTAL_VALUE = 10.0
 VALUE_RATIO_GRID = np.array([1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 5.0, 10.0, 20.0])
 N_RATIO = len(VALUE_RATIO_GRID)
 
-N_DELTA = 10
-DELTA_GRID = np.round(np.logspace(np.log10(0.010), np.log10(1.0), N_DELTA), 4)
+DELTA_GRID_MS = [10, 25, 50, 100, 250, 500, 1000, 3000, 6000, 12000]
+DELTA_GRID = np.array([d / 1000.0 for d in DELTA_GRID_MS])
+N_DELTA = len(DELTA_GRID)
 
 N_INSTANCES = 3  # random source-layout instances per cell
 N_SEEDS_PER_INSTANCE = 3   # random ABR initialisations per instance

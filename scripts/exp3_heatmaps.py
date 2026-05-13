@@ -266,7 +266,7 @@ def _plot_heatmap(ax, grid, title, cbar_label, vmin=None, vmax=None,
         ax.axvline(delta_50_idx, color="white", lw=1.0, ls="--", alpha=0.7)
 
     ax.set_xlabel(r"Slot duration $\Delta$ (ms)")
-    ax.set_ylabel("Per-source value ratio (high / low)")
+    ax.set_ylabel("Expected per-source value ratio (high / low)")
     ax.set_title(title, fontsize=10)
 
     for side in ("top", "right", "bottom", "left"):

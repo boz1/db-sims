@@ -16,7 +16,10 @@ from sim.simulator import (
     compute_all_builder_utilities, compute_expected_reward,
 )
 from analysis.poa import optimal_welfare_brute_force, optimal_welfare_greedy, _compute_welfare_analytical
+from functools import lru_cache
+from itertools import combinations
 
+_D_MAX_DISK_CACHE_PATH = Path(__file__).resolve().parent.parent / "results" / "d_max_cache.npz"
 
 REGIONS_DEFAULT = [
     # US/EU high-value cluster
@@ -286,52 +289,55 @@ def mean_pairwise_distance_km(profile: list, region_names: list,
             count += 1
     return total / count
 
-def mean_pairwise_distance_km_distinct(profile: list, region_names: list,
-                                        coords: dict = GCP_REGION_COORDS) -> float:
-    """Mean great-circle distance over builder pairs in distinct regions.
- 
-    Colocated pairs (same region, distance = 0) are excluded from the average.
-    This decouples geographic spread from the count of colocated builders
-    (which is already captured by geographic HHI). Returns 0 if all builders
-    are in the same region.
+def max_mean_pairwise_distance_km(K: int, region_names: tuple,
+                                   coords: dict = GCP_REGION_COORDS) -> float:
+    """Maximum mean pairwise great-circle distance achievable by placing K
+    builders across region_names. Brute force over all K-subsets, cached
+    in-memory (lru_cache) and on disk (pickle).
     """
-    K = len(profile)
     if K < 2:
         return 0.0
-    total, count = 0.0, 0
-    for i in range(K):
-        for j in range(i + 1, K):
-            if profile[i] == profile[j]:
-                continue
-            total += great_circle_km(region_names[profile[i]],
-                                     region_names[profile[j]], coords)
-            count += 1
-    return total / count if count > 0 else 0.0
- 
- 
-def mean_pairwise_distance_km_unique_regions(profile: list, region_names: list,
-                                              coords: dict = GCP_REGION_COORDS) -> float:
-    """Mean great-circle distance over pairs of unique occupied regions.
- 
-    Each occupied region counts once regardless of how many builders are there.
-    Useful for asking "how spread out is the set of occupied regions?", which
-    is K-invariant: only depends on which regions are used, not how the
-    builders are distributed across them. Returns 0 if only one region is
-    occupied.
-    """
-    unique = list(set(profile))
-    n = len(unique)
-    if n < 2:
-        return 0.0
-    total, count = 0.0, 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            total += great_circle_km(region_names[unique[i]],
-                                     region_names[unique[j]], coords)
-            count += 1
-    return total / count
- 
+    # Disk-cache lookup
+    cache = _load_d_max_disk_cache()
+    key = (K, region_names)
+    if key in cache:
+        return cache[key]
+    # Compute (also populates lru_cache)
+    result = _max_mean_pairwise_distance_km_cached(K, region_names)
+    cache[key] = result
+    _save_d_max_disk_cache(cache)
+    return result
 
+
+def _load_d_max_disk_cache() -> dict:
+    if _D_MAX_DISK_CACHE_PATH.exists():
+        try:
+            npz = np.load(_D_MAX_DISK_CACHE_PATH, allow_pickle=True)
+            return npz["cache"].item()
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_d_max_disk_cache(cache: dict) -> None:
+    _D_MAX_DISK_CACHE_PATH.parent.mkdir(exist_ok=True)
+    np.savez_compressed(_D_MAX_DISK_CACHE_PATH, cache=np.array(cache, dtype=object))
+
+@lru_cache(maxsize=None)
+def _max_mean_pairwise_distance_km_cached(K: int, region_names: tuple) -> float:
+    """Cached brute-force search over K-subsets of region_names."""
+    coords = GCP_REGION_COORDS
+    best = 0.0
+    n_pairs = K * (K - 1) / 2
+    for subset in combinations(region_names, K):
+        total = 0.0
+        for i in range(K):
+            for j in range(i + 1, K):
+                total += great_circle_km(subset[i], subset[j], coords)
+        mean = total / n_pairs
+        if mean > best:
+            best = mean
+    return best
 
 def geo_hhi(profile: list, n_regions: int) -> float:
     """Geographic HHI: sum of squared region-occupancy fractions."""

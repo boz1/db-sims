@@ -4,7 +4,7 @@ Experiment 5: Heatmaps over (number of builders K, delta)
 Sweeps number of builders K on the y-axis and slot duration delta on the
 x-axis. Value concentration is fixed at ratio = 10x (alpha ~ 0.91).
 
-Like exp3, each cell is the median over (N_INSTANCES random source layouts) x
+Each cell is the median over (N_INSTANCES random source layouts) x
 (N_SEEDS_PER_INSTANCE random ABR initialisations). Results are cached so
 plotting can be iterated without re-running the simulation.
 """
@@ -32,6 +32,7 @@ from scripts.exp_helpers import (
     make_sliced_prop,
     compute_opt_sliced,
     run_abr_full,
+    max_mean_pairwise_distance_km,
 )
 
 REGIONS_EXP = list(REGIONS_DEFAULT) + ["europe-west2", "asia-northeast2", "asia-south2", "us-west2"]
@@ -200,8 +201,35 @@ def _planner_worker(args):
     }
 
 
-def _build_grids(abr_runs, planner_runs):
-    """Return dict {metric_name: (N_K, N_DELTA) array of medians}."""
+def _compute_d_max_by_K():
+    """Compute D_max(K) for each K in K_GRID: the maximum mean pairwise
+    distance over all K-subsets of REGIONS_EXP. Returns dict {K: D_max_km}.
+    """
+    region_tuple = tuple(REGIONS_EXP)
+    d_max = {}
+    for K in K_GRID:
+        K_int = int(K)
+        n_subsets = comb(len(REGIONS_EXP), K_int)
+        print(f"  D_max for K={K_int} ({n_subsets:,} subsets) ...",
+              end=" ", flush=True)
+        d_max[K_int] = max_mean_pairwise_distance_km(K_int, region_tuple)
+        print(f"{d_max[K_int]:.0f} km")
+    return d_max
+
+
+def _build_grids(abr_runs, planner_runs, d_max_by_K):
+    """Return dict {metric_name: (N_K, N_DELTA) array of medians}.
+
+    HHI variants:
+      - geo_hhi: raw, floor 1/K, max 1
+      - geo_hhi_norm: (HHI - 1/K) / (1 - 1/K)
+      - utility_hhi: raw, floor 1/K, NE ceiling 9/(8K)
+      - utility_hhi_norm: (HHI - 1/K) / (9/(8K) - 1/K)
+
+    Pairwise distance:
+      - mean_pairwise_km: raw (km)
+      - mean_pairwise_km_norm: raw / D_max(K), in [0, 1]
+    """
     abr_by_cell = {}
     for r in abr_runs:
         key = (r["k_idx"], r["delta_idx"])
@@ -212,11 +240,19 @@ def _build_grids(abr_runs, planner_runs):
         key = (p["k_idx"], p["delta_idx"])
         planner_by_cell.setdefault(key, []).append(p)
 
-    metrics = ["welfare_ratio", "geo_hhi", "utility_hhi",
-               "mean_pairwise_km_distinct", "cov_high", "cov_peripheral"]
+    metrics = ["welfare_ratio",
+               "geo_hhi", "geo_hhi_norm",
+               "utility_hhi", "utility_hhi_norm",
+               "mean_pairwise_km", "mean_pairwise_km_norm",
+               "cov_high", "cov_peripheral"]
     grids = {m: np.full((N_K, N_DELTA), np.nan) for m in metrics}
 
     for (ki, di), runs in abr_by_cell.items():
+        K = int(K_GRID[ki])
+        floor = 1.0 / K
+        ne_ceiling = 9.0 / (8.0 * K)
+        d_max = d_max_by_K[K]
+
         planners = planner_by_cell.get((ki, di), [])
         w_opt_by_inst = {p["instance_idx"]: p["w_opt"] for p in planners}
 
@@ -228,8 +264,30 @@ def _build_grids(abr_runs, planner_runs):
         if ratios_list:
             grids["welfare_ratio"][ki, di] = float(np.median(ratios_list))
 
-        for key in ("geo_hhi", "utility_hhi", "mean_pairwise_km_distinct",
-                    "cov_high", "cov_peripheral"):
+        geo_vals = [r["geo_hhi"] for r in runs if "geo_hhi" in r]
+        if geo_vals:
+            geo_med = float(np.median(geo_vals))
+            grids["geo_hhi"][ki, di] = geo_med
+            denom = 1.0 - floor
+            grids["geo_hhi_norm"][ki, di] = max(0.0, (geo_med - floor) / denom) \
+                if denom > 1e-12 else 0.0
+
+        util_vals = [r["utility_hhi"] for r in runs if "utility_hhi" in r]
+        if util_vals:
+            util_med = float(np.median(util_vals))
+            grids["utility_hhi"][ki, di] = util_med
+            denom = ne_ceiling - floor
+            grids["utility_hhi_norm"][ki, di] = (util_med - floor) / denom \
+                if denom > 1e-12 else 0.0
+
+        mpd_vals = [r["mean_pairwise_km"] for r in runs if "mean_pairwise_km" in r]
+        if mpd_vals:
+            mpd_med = float(np.median(mpd_vals))
+            grids["mean_pairwise_km"][ki, di] = mpd_med
+            grids["mean_pairwise_km_norm"][ki, di] = mpd_med / d_max \
+                if d_max > 1e-12 else 0.0
+
+        for key in ("cov_high", "cov_peripheral"):
             vals = [r[key] for r in runs if key in r]
             if vals:
                 grids[key][ki, di] = float(np.median(vals))
@@ -237,11 +295,15 @@ def _build_grids(abr_runs, planner_runs):
     return grids
 
 
-def _plot_heatmap(ax, grid, title, cbar_label, vmin=None, vmax=None,
-                  cmap="viridis"):
-    """Plot one (N_K, N_DELTA) heatmap. K on y, delta on x."""
+def _plot_heatmap(ax, grid_color, grid_labels, title, cbar_label,
+                  vmin=None, vmax=None, cmap="viridis", label_fmt="{:.2f}"):
+    """Plot one (N_K, N_DELTA) heatmap.
+
+    grid_color: array used for the colormap
+    grid_labels: array used for in-cell text labels (None to skip labels)
+    """
     im = ax.imshow(
-        grid,
+        grid_color,
         aspect="auto",
         origin="lower",
         cmap=cmap,
@@ -249,7 +311,7 @@ def _plot_heatmap(ax, grid, title, cbar_label, vmin=None, vmax=None,
         interpolation="nearest",
     )
 
-    n_k, n_delta = grid.shape
+    n_k, n_delta = grid_color.shape
     ax.set_yticks(np.arange(n_k))
     ax.set_yticklabels([str(k) for k in K_GRID], fontsize=7)
     ax.set_xticks(np.arange(n_delta))
@@ -267,17 +329,19 @@ def _plot_heatmap(ax, grid, title, cbar_label, vmin=None, vmax=None,
     for side in ("top", "right", "bottom", "left"):
         ax.spines[side].set_visible(True)
 
-    if n_k * n_delta <= 200:
+    if grid_labels is not None and n_k * n_delta <= 200:
+        gmin = vmin if vmin is not None else np.nanmin(grid_color)
+        gmax = vmax if vmax is not None else np.nanmax(grid_color)
+        rng = max(1e-9, gmax - gmin)
         for ki in range(n_k):
             for di in range(n_delta):
-                v = grid[ki, di]
-                if np.isnan(v):
+                v_color = grid_color[ki, di]
+                v_label = grid_labels[ki, di]
+                if np.isnan(v_color) or np.isnan(v_label):
                     continue
-                norm_v = (v - (vmin if vmin is not None else np.nanmin(grid))) / \
-                         max(1e-9, ((vmax if vmax is not None else np.nanmax(grid)) -
-                                    (vmin if vmin is not None else np.nanmin(grid))))
+                norm_v = (v_color - gmin) / rng
                 color = "white" if norm_v < 0.5 else "black"
-                ax.text(di, ki, f"{v:.2f}",
+                ax.text(di, ki, label_fmt.format(v_label),
                         ha="center", va="center", fontsize=6, color=color)
 
     cbar = plt.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
@@ -289,26 +353,53 @@ def plot_heatmaps(grids):
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
     fig.subplots_adjust(hspace=0.45, wspace=0.45)
 
-    egal_floor_min = 1 / K_GRID.max()
-    ne_ceiling_max = 9 / (8 * K_GRID.min())
+    _plot_heatmap(
+        axes[0, 0],
+        grids["welfare_ratio"], grids["welfare_ratio"],
+        "(A) Welfare ratio $W_{\\rm ABR}/W^*$",
+        "ratio", vmin=0.5, vmax=1.0, cmap="viridis",
+    )
 
-    panels = [
-        (axes[0, 0], grids["welfare_ratio"], "(A) Welfare ratio $W_{\\rm ABR}/W^*$",
-         "ratio", 0.5, 1.0, "viridis"),
-        (axes[0, 1], grids["geo_hhi"], "(B) Geographic HHI",
-         "HHI", egal_floor_min, 1.0, "magma"),
-        (axes[0, 2], grids["utility_hhi"], "(C) Utility HHI",
-         "HHI", egal_floor_min, ne_ceiling_max, "magma"),
-        (axes[1, 0], grids["mean_pairwise_km_distinct"],
-         "(D) Mean pairwise distance (distinct-region pairs)",
-         "km", None, None, "cividis"),
-        (axes[1, 1], grids["cov_high"], "(E) High-value cluster coverage",
-         "fraction", 0.0, 1.0, "viridis"),
-        (axes[1, 2], grids["cov_peripheral"], "(F) Peripheral cluster coverage",
-         "fraction", 0.0, 1.0, "viridis"),
-    ]
-    for ax, grid, title, cbar_label, vmin, vmax, cmap in panels:
-        _plot_heatmap(ax, grid, title, cbar_label, vmin=vmin, vmax=vmax, cmap=cmap)
+    _plot_heatmap(
+        axes[0, 1],
+        grids["geo_hhi_norm"], grids["geo_hhi"],
+        "(B) Geographic HHI (normalised, label = raw)",
+        "$(\\mathrm{HHI} - 1/K) / (1 - 1/K)$",
+        vmin=0.0, vmax=1.0, cmap="magma",
+        label_fmt="{:.3f}",
+    )
+
+    _plot_heatmap(
+        axes[0, 2],
+        grids["utility_hhi_norm"], grids["utility_hhi"],
+        "(C) Utility HHI (normalised, label = raw)",
+        "$(\\mathrm{HHI} - 1/K) / (9/(8K) - 1/K)$",
+        vmin=0.0, vmax=1.0, cmap="magma",
+        label_fmt="{:.3f}",
+    )
+
+    _plot_heatmap(
+        axes[1, 0],
+        grids["mean_pairwise_km_norm"], grids["mean_pairwise_km"],
+        "(D) Mean pairwise distance (normalised by $D_{\\max}(K)$, label = raw km)",
+        "$D_{\\rm ABR}\\,/\\,D_{\\max}(K)$",
+        vmin=0.0, vmax=1.0, cmap="cividis",
+        label_fmt="{:.0f}",
+    )
+
+    _plot_heatmap(
+        axes[1, 1],
+        grids["cov_high"], grids["cov_high"],
+        "(E) High-value cluster coverage",
+        "fraction", vmin=0.0, vmax=1.0, cmap="viridis",
+    )
+
+    _plot_heatmap(
+        axes[1, 2],
+        grids["cov_peripheral"], grids["cov_peripheral"],
+        "(F) Peripheral cluster coverage",
+        "fraction", vmin=0.0, vmax=1.0, cmap="viridis",
+    )
 
     fig.suptitle(
         rf"Builder count vs slot duration heatmaps "
@@ -380,6 +471,10 @@ def main():
     print(f"Cache: {cache_path} (exists: {cache_exists})")
     print()
 
+    print("Computing D_max(K) for each K:")
+    d_max_by_K = _compute_d_max_by_K()
+    print()
+
     if args.load:
         if not cache_exists:
             raise FileNotFoundError(
@@ -393,7 +488,7 @@ def main():
         abr_runs, planner_runs = _compute(args)
         _save_cache(abr_runs, planner_runs, cache_path)
 
-    grids = _build_grids(abr_runs, planner_runs)
+    grids = _build_grids(abr_runs, planner_runs, d_max_by_K)
     plot_heatmaps(grids)
 
 

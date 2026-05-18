@@ -11,6 +11,7 @@ curves are median + IQR over all (instance, seed) ABR runs.
 Planner benchmarks are computed once per (K, instance), so planner curves
 are also shown as median + IQR over source-layout instances.
 """
+import argparse
 import sys
 import warnings
 import json
@@ -22,25 +23,48 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from math import comb
 from multiprocessing import Pool, cpu_count
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
-from scripts.exp_helpers import (
-    REGIONS_DEFAULT,
-    FIGURES_DIR,
-    GCP_REGION_COORDS,
-    load_propagation_model,
-    build_two_cluster_sources,
-    make_sliced_prop,
-    compute_opt_sliced,
-    run_abr_full,
-    geo_hhi,
-    mean_pairwise_distance_km,
-    cluster_coverage_fraction,
-)
-from sim.simulator import compute_all_builder_utilities
-from sim.metrics import hhi as _hhi
+from scripts.exp_constants import REGIONS_DEFAULT
+from scripts.plot_common import FIGURES_DIR, GCP_REGION_COORDS
+from scripts.plot_exp2_builder_count import plot
+from scripts.plot_results import load_exp2_results
+
+
+_RUNTIME_DEPS_LOADED = False
+
+
+def _load_runtime_deps():
+    global _RUNTIME_DEPS_LOADED
+    global load_propagation_model, build_two_cluster_sources, make_sliced_prop
+    global compute_opt_sliced, run_abr_full, geo_hhi
+    global mean_pairwise_distance_km, cluster_coverage_fraction
+    global compute_all_builder_utilities, _hhi
+    if _RUNTIME_DEPS_LOADED:
+        return
+    from scripts.exp_helpers import (
+        load_propagation_model as _load_propagation_model,
+        build_two_cluster_sources as _build_two_cluster_sources,
+        make_sliced_prop as _make_sliced_prop,
+        compute_opt_sliced as _compute_opt_sliced,
+        run_abr_full as _run_abr_full,
+        geo_hhi as _geo_hhi,
+        mean_pairwise_distance_km as _mean_pairwise_distance_km,
+        cluster_coverage_fraction as _cluster_coverage_fraction,
+    )
+    from sim.simulator import compute_all_builder_utilities as _compute_all_builder_utilities
+    from sim.metrics import hhi as _metric_hhi
+
+    load_propagation_model = _load_propagation_model
+    build_two_cluster_sources = _build_two_cluster_sources
+    make_sliced_prop = _make_sliced_prop
+    compute_opt_sliced = _compute_opt_sliced
+    run_abr_full = _run_abr_full
+    geo_hhi = _geo_hhi
+    mean_pairwise_distance_km = _mean_pairwise_distance_km
+    cluster_coverage_fraction = _cluster_coverage_fraction
+    compute_all_builder_utilities = _compute_all_builder_utilities
+    _hhi = _metric_hhi
+    _RUNTIME_DEPS_LOADED = True
 
 REGIONS_EXP2 = list(REGIONS_DEFAULT) + ["europe-west2", "asia-northeast2", "asia-south2", "us-west2"]
 
@@ -78,16 +102,6 @@ PERIPHERAL_POOL = [
 OPT_METHOD = "greedy"
 BRUTE_FORCE_MAX_PROFILES = 10_000_000  # used only if OPT_METHOD == "auto"
 
-plt.rcParams.update({
-    "font.family": "serif",
-    "font.size": 10,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-})
-
-ABR_COLOR = "#1f77b4"
-PLAN_COLOR = "#2ca02c"
-
 def sample_source_layout(rng):
     """Return (high_value_regions, peripheral_regions) drawn from the pools."""
     high = list(rng.choice(HIGH_VALUE_POOL, size=N_HIGH, replace=False))
@@ -95,6 +109,7 @@ def sample_source_layout(rng):
     return high, peri
 
 def _worker(args):
+    _load_runtime_deps()
     K, instance_idx, seed_within_instance = args
 
     inst_rng = np.random.default_rng(instance_idx)
@@ -139,6 +154,7 @@ def _opt_method_for(K, n_regions):
 
 
 def compute_planner_metrics_one(args):
+    _load_runtime_deps()
     K, instance_idx, opt_method = args
 
     inst_rng = np.random.default_rng(instance_idx)
@@ -181,12 +197,6 @@ def compute_planner_metrics_one(args):
         "peri_regions": peri_regions,
     }
 
-def _summarize(values):
-    """Median, 25th percentile, 75th percentile."""
-    arr = np.asarray(values, dtype=float)
-    if arr.size == 0:
-        return np.nan, np.nan, np.nan
-    return float(np.median(arr)), float(np.percentile(arr, 25)), float(np.percentile(arr, 75))
 
 def save_results(K_grid, abr_runs_by_K, planner_runs_by_K,
                  region_names, n_runs_per_K, opt_method):
@@ -245,240 +255,30 @@ def save_results(K_grid, abr_runs_by_K, planner_runs_by_K,
     print(f"  {pkl_path}")
     print(f"  {json_path}")
 
-def _plot_world_map(ax, builder_counts_by_region, region_names, K,
-                    title, region_coords=GCP_REGION_COORDS):
-    """Equirectangular world map with markers sized by mean builder count.
-
-    builder_counts_by_region: dict {region_name: mean_count_over_runs}
-    """
-    ax.set_xlim(-180, 180)
-    ax.set_ylim(-65, 80)
-    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180])
-    ax.set_yticks([-60, -30, 0, 30, 60])
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.grid(True, alpha=0.25, lw=0.5, ls=":")
-    ax.set_aspect("equal", adjustable="box")
-    ax.tick_params(left=False, bottom=False)
-
-    for side in ("top", "right", "bottom", "left"):
-        ax.spines[side].set_visible(True)
-        ax.spines[side].set_linewidth(0.8)
-        ax.spines[side].set_color("black")
-
-    for r_name in region_names:
-        if r_name not in region_coords:
-            continue
-        lat, lon = region_coords[r_name]
-        ax.scatter(lon, lat, s=8, c="#cccccc", zorder=2, edgecolors="none")
-
-    for r_name, count in builder_counts_by_region.items():
-        if count <= 0 or r_name not in region_coords:
-            continue
-        lat, lon = region_coords[r_name]
-        size = 30 + 55 * count
-        ax.scatter(lon, lat, s=size, c=ABR_COLOR, alpha=0.65,
-                   edgecolors="white", linewidths=0.6, zorder=3)
-
-    ax.set_title(title, fontsize=10)
-
-
-def _builder_counts(profiles, region_names):
-    """Aggregate a list of converged profiles into mean per-region builder counts."""
-    counts = {r: 0.0 for r in region_names}
-    n_profiles = len(profiles)
-    if n_profiles == 0:
-        return counts
-    for profile in profiles:
-        for r_idx in profile:
-            counts[region_names[r_idx]] += 1.0 / n_profiles
-    return counts
-
-
-def plot(K_grid, abr_runs_by_K, planner_runs_by_K, n_runs_per_K, region_names):
-    """abr_runs_by_K[K] = list of run dicts.
-    planner_runs_by_K[K] = list of planner dicts (one per instance)."""
-
-    def _abr_agg(key):
-        meds, los, his = [], [], []
-        for K in K_grid:
-            vals = [r[key] for r in abr_runs_by_K[K]]
-            m, lo, hi = _summarize(vals)
-            meds.append(m); los.append(lo); his.append(hi)
-        return np.array(meds), np.array(los), np.array(his)
-
-    def _plan_agg(key):
-        meds, los, his = [], [], []
-        for K in K_grid:
-            vals = [r[key] for r in planner_runs_by_K[K]]
-            m, lo, hi = _summarize(vals)
-            meds.append(m); los.append(lo); his.append(hi)
-        return np.array(meds), np.array(los), np.array(his)
-
-    wr_med, wr_lo, wr_hi = [], [], []
-    for K in K_grid:
-        w_opt_by_inst = {p["instance_idx"]: p["w_opt"] for p in planner_runs_by_K[K]}
-        ratios = []
-        for r in abr_runs_by_K[K]:
-            w_opt = w_opt_by_inst.get(r["instance_idx"])
-            if w_opt is not None and w_opt > 1e-12:
-                ratios.append(r["welfare"] / w_opt)
-        m, lo, hi = _summarize(ratios)
-        wr_med.append(m); wr_lo.append(lo); wr_hi.append(hi)
-    wr_med = np.array(wr_med); wr_lo = np.array(wr_lo); wr_hi = np.array(wr_hi)
-
-    geo_med, geo_lo, geo_hi = _abr_agg("geo_hhi")
-    util_med, util_lo, util_hi = _abr_agg("utility_hhi")
-    cov_hi_med, cov_hi_lo, cov_hi_hi = _abr_agg("cov_high")
-    cov_pe_med, cov_pe_lo, cov_pe_hi = _abr_agg("cov_peripheral")
-    mpd_med, mpd_lo, mpd_hi = _abr_agg("mean_pairwise_km")
-
-    geo_opt_med, geo_opt_lo, geo_opt_hi = _plan_agg("geo_hhi_opt")
-    cov_hi_opt_med, cov_hi_opt_lo, cov_hi_opt_hi = _plan_agg("cov_high_opt")
-    cov_pe_opt_med, cov_pe_opt_lo, cov_pe_opt_hi = _plan_agg("cov_peripheral_opt")
-    mpd_opt_med, mpd_opt_lo, mpd_opt_hi = _plan_agg("mean_pairwise_km_opt")
-
-    x = np.array(K_grid)
-    welfare_floor = np.array([1.0 / (2.0 - 1.0 / K) for K in K_grid])
-    geo_floor = np.array([1.0 / K for K in K_grid])
-    util_ceiling = np.array([9.0 / (8.0 * K) for K in K_grid])
-    util_egalitarian = np.array([1.0 / K for K in K_grid])
-
-    band_label = (
-        f"ABR IQR "
-        f"({N_INSTANCES} source instances × {N_SEEDS_PER_INSTANCE} init)"
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--load-results",
+        help="Load a saved exp2 .pkl/.json payload and replot without rerunning.",
     )
-    planner_band_label = f"Planner IQR ({N_INSTANCES} source instances)"
+    args = parser.parse_args(argv)
+    if args.load_results:
+        loaded = load_exp2_results(args.load_results)
+        meta = loaded.metadata
+        plot(
+            loaded.K_grid,
+            loaded.abr_runs_by_K,
+            loaded.planner_runs_by_K,
+            loaded.n_runs_per_K,
+            region_names=loaded.region_names,
+            alpha=meta.get("ALPHA", ALPHA),
+            delta=meta.get("DELTA", DELTA),
+            n_instances=meta.get("N_INSTANCES", N_INSTANCES),
+            n_seeds_per_instance=meta.get("N_SEEDS_PER_INSTANCE", N_SEEDS_PER_INSTANCE),
+        )
+        return
 
-    # Layout: top row 2 panels, middle row 3 panels, bottom row 3 panels.
-    fig = plt.figure(figsize=(13, 11))
-    gs = fig.add_gridspec(
-        nrows=3, ncols=6,
-        height_ratios=[1.0, 1.0, 1.05],
-        hspace=0.45, wspace=0.55,
-    )
-
-    # Row 1: panels A and B
-    ax_A = fig.add_subplot(gs[0, 0:3])
-    ax_B = fig.add_subplot(gs[0, 3:6])
-    # Row 2: panels C, D, E
-    ax_C = fig.add_subplot(gs[1, 0:2])
-    ax_D = fig.add_subplot(gs[1, 2:4])
-    ax_E = fig.add_subplot(gs[1, 4:6])
-    # Row 3: mean pairwise distance and two maps
-    ax_F = fig.add_subplot(gs[2, 0:2])
-    ax_M1 = fig.add_subplot(gs[2, 2:4])
-    ax_M2 = fig.add_subplot(gs[2, 4:6])
-
-    # Panel A: welfare ratio
-    ax = ax_A
-    ax.plot(x, wr_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, wr_lo, wr_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, welfare_floor, "--", color="gray", lw=1.2, label=r"Floor $1/(2-1/K)$")
-    ax.axhline(1.0, ls=":", color="black", lw=0.8, alpha=0.6)
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel(r"$W_{\rm ABR}\,/\,W^*$")
-    ax.set_ylim(0.45, 1.05)
-    ax.set_title("(A) Welfare ratio")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.2)
-
-    # Panel B: geographic HHI
-    ax = ax_B
-    ax.plot(x, geo_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, geo_lo, geo_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, geo_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median")
-    ax.fill_between(x, geo_opt_lo, geo_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    ax.plot(x, geo_floor, ":", color="black", lw=1.0, alpha=0.7, label=r"Floor $1/K$")
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel("Geographic HHI")
-    ax.set_title("(B) Geographic HHI")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.2)
-
-    # Panel C: utility HHI
-    ax = ax_C
-    ax.plot(x, util_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, util_lo, util_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, util_ceiling, "--", color="gray", lw=1.2, label=r"NE ceiling $9/(8K)$")
-    ax.plot(x, util_egalitarian, ":", color="black", lw=1.0, alpha=0.7,
-            label=r"Egalitarian $1/K$")
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel("Utility HHI")
-    ax.set_title("(C) Utility HHI")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.2)
-
-    # Panel D: high-value cluster coverage
-    ax = ax_D
-    ax.plot(x, cov_hi_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, cov_hi_lo, cov_hi_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, cov_hi_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median")
-    ax.fill_between(x, cov_hi_opt_lo, cov_hi_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel("Coverage fraction")
-    ax.set_ylim(-0.05, 1.05)
-    ax.set_title("(D) High-value cluster coverage")
-    ax.legend(fontsize=8, loc="lower right")
-    ax.grid(alpha=0.2)
-
-    # Panel E: peripheral cluster coverage
-    ax = ax_E
-    ax.plot(x, cov_pe_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, cov_pe_lo, cov_pe_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, cov_pe_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median")
-    ax.fill_between(x, cov_pe_opt_lo, cov_pe_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel("Coverage fraction")
-    ax.set_ylim(-0.05, 1.05)
-    ax.set_title("(E) Peripheral cluster coverage")
-    ax.legend(fontsize=8, loc="lower right")
-    ax.grid(alpha=0.2)
-
-    # Panel F: mean pairwise distance
-    ax = ax_F
-    ax.plot(x, mpd_med, "-o", color=ABR_COLOR, lw=1.5, ms=4, label="ABR (median)")
-    ax.fill_between(x, mpd_lo, mpd_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, mpd_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median")
-    ax.fill_between(x, mpd_opt_lo, mpd_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    ax.set_xlabel("Number of builders $K$")
-    ax.set_ylabel("Mean pairwise distance (km)")
-    ax.set_title("(F) Mean pairwise distance")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.2)
-
-    # Bottom row: world maps at smallest and largest K with data.
-    Ks_with_data = [K for K in K_grid if abr_runs_by_K.get(K)]
-    if len(Ks_with_data) >= 2:
-        map_Ks = [Ks_with_data[0], Ks_with_data[-1]]
-    elif len(Ks_with_data) == 1:
-        map_Ks = [Ks_with_data[0], Ks_with_data[0]]
-    else:
-        map_Ks = []
-
-    for ax_map, K in zip([ax_M1, ax_M2], map_Ks):
-        profiles = [r["final_profile"] for r in abr_runs_by_K.get(K, [])]
-        counts = _builder_counts(profiles, region_names)
-        _plot_world_map(ax_map, counts, region_names, K,
-                        title=rf"$K = {K}$  (mean ABR placement)")
-
-    fig.suptitle(
-        rf"Experiment 2: Builder count sweep "
-        rf"($\alpha={ALPHA}$, $\Delta={int(DELTA*1000)}\,\mathrm{{ms}}$, "
-        rf"{N_INSTANCES} source instances $\times$ {N_SEEDS_PER_INSTANCE} inits)",
-        fontsize=12, y=0.995,
-    )
-    out = FIGURES_DIR / "exp2_builder_count.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    fig.savefig(str(out).replace(".pdf", ".png"), dpi=180, bbox_inches="tight")
-    print(f"Saved {out}")
-
-
-def main():
+    _load_runtime_deps()
     regions, _, _ = load_propagation_model(REGIONS_EXP2)
     n_regions = len(regions)
 
@@ -572,8 +372,17 @@ def main():
         opt_method=opt_method,
     )
 
-    plot(K_GRID, abr_runs_by_K, planner_runs_by_K,
-         n_runs_per_K, region_names=regions)
+    plot(
+        K_GRID,
+        abr_runs_by_K,
+        planner_runs_by_K,
+        n_runs_per_K,
+        region_names=regions,
+        alpha=ALPHA,
+        delta=DELTA,
+        n_instances=N_INSTANCES,
+        n_seeds_per_instance=N_SEEDS_PER_INSTANCE,
+    )
 
 
 if __name__ == "__main__":

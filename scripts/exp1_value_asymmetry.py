@@ -10,6 +10,7 @@ For each ratio we draw N_INSTANCES random source layouts and run
 N_SEEDS_PER_INSTANCE ABR runs from random initial placements. Reported
 curves are median + IQR over all (instance, seed) runs.
 """
+import argparse
 import sys
 import warnings
 import json
@@ -21,31 +22,55 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from math import comb
 from multiprocessing import Pool, cpu_count
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
-from scripts.exp_helpers import (
-    REGIONS_DEFAULT,
-    FIGURES_DIR,
-    GCP_REGION_COORDS,
-    load_propagation_model,
-    build_two_cluster_sources,
-    make_sliced_prop,
-    compute_opt_sliced,
-    run_abr_full,
-    geo_hhi,
-    mean_pairwise_distance_km,
-    cluster_coverage_fraction,
-)
-from sim.simulator import compute_all_builder_utilities
-from sim.metrics import hhi as _hhi
+from scripts.exp_constants import REGIONS_DEFAULT
+from scripts.plot_common import FIGURES_DIR, GCP_REGION_COORDS
+from scripts.plot_exp1_value_asymmetry import plot
+from scripts.plot_results import load_exp1_results
+
+
+_RUNTIME_DEPS_LOADED = False
+
+
+def _load_runtime_deps():
+    global _RUNTIME_DEPS_LOADED
+    global load_propagation_model, build_two_cluster_sources, make_sliced_prop
+    global compute_opt_sliced, run_abr_full, geo_hhi
+    global mean_pairwise_distance_km, cluster_coverage_fraction
+    global compute_all_builder_utilities, _hhi
+    if _RUNTIME_DEPS_LOADED:
+        return
+    from scripts.exp_helpers import (
+        load_propagation_model as _load_propagation_model,
+        build_two_cluster_sources as _build_two_cluster_sources,
+        make_sliced_prop as _make_sliced_prop,
+        compute_opt_sliced as _compute_opt_sliced,
+        run_abr_full as _run_abr_full,
+        geo_hhi as _geo_hhi,
+        mean_pairwise_distance_km as _mean_pairwise_distance_km,
+        cluster_coverage_fraction as _cluster_coverage_fraction,
+    )
+    from sim.simulator import compute_all_builder_utilities as _compute_all_builder_utilities
+    from sim.metrics import hhi as _metric_hhi
+
+    load_propagation_model = _load_propagation_model
+    build_two_cluster_sources = _build_two_cluster_sources
+    make_sliced_prop = _make_sliced_prop
+    compute_opt_sliced = _compute_opt_sliced
+    run_abr_full = _run_abr_full
+    geo_hhi = _geo_hhi
+    mean_pairwise_distance_km = _mean_pairwise_distance_km
+    cluster_coverage_fraction = _cluster_coverage_fraction
+    compute_all_builder_utilities = _compute_all_builder_utilities
+    _hhi = _metric_hhi
+    _RUNTIME_DEPS_LOADED = True
 
 REGIONS_EXP1 = list(REGIONS_DEFAULT) + ["europe-west2", "asia-northeast2", "asia-south2", "us-west2"]
 
 # Experiment parameters
 MASTER_SEED = 1234
 K = 5
+# DELTA = 0.2
 DELTA = 0.05
 TOTAL_VALUE = 10.0
 
@@ -97,16 +122,6 @@ PERIPHERAL_POOL = [
 OPT_METHOD = "greedy"
 BRUTE_FORCE_MAX_PROFILES = 10_000_000  # used only if OPT_METHOD == "auto"
 
-plt.rcParams.update({
-    "font.family": "serif",
-    "font.size": 10,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-})
-
-ABR_COLOR = "#1f77b4"
-PLAN_COLOR = "#2ca02c"
-
 def sample_source_layout(rng):
     """Return (high_value_regions, peripheral_regions) drawn from the pools."""
     high = list(rng.choice(HIGH_VALUE_POOL, size=N_HIGH, replace=False))
@@ -117,6 +132,7 @@ def sample_source_layout(rng):
 # Worker: run one (ratio_idx, ratio, alpha, instance, seed) job
 
 def _worker(args):
+    _load_runtime_deps()
     ratio_idx, value_ratio, alpha, instance_idx, seed_within_instance = args
     inst_rng = np.random.default_rng(MASTER_SEED + instance_idx)
     high_regions, peri_regions = sample_source_layout(inst_rng)
@@ -165,6 +181,7 @@ def _opt_method_for(K, n_regions):
 
 
 def compute_planner_metrics_one(args):
+    _load_runtime_deps()
     ratio_idx, value_ratio, alpha, instance_idx, opt_method = args
 
     inst_rng = np.random.default_rng(MASTER_SEED + instance_idx)
@@ -208,13 +225,6 @@ def compute_planner_metrics_one(args):
         "high_regions": high_regions,
         "peri_regions": peri_regions,
     }
-
-def _summarize(values):
-    """Median, 25th percentile, 75th percentile."""
-    arr = np.asarray(values, dtype=float)
-    if arr.size == 0:
-        return np.nan, np.nan, np.nan
-    return float(np.median(arr)), float(np.percentile(arr, 25)), float(np.percentile(arr, 75))
 
 
 def save_results(value_ratio_grid, alpha_grid, abr_runs_by_ratio, planner_runs_by_ratio,
@@ -278,267 +288,30 @@ def save_results(value_ratio_grid, alpha_grid, abr_runs_by_ratio, planner_runs_b
     print(f"  {pkl_path}")
     print(f"  {json_path}")
 
-def _plot_world_map(ax, builder_counts_by_region, region_names, K,
-                    title, region_coords=GCP_REGION_COORDS):
-    """Equirectangular world map with markers sized by mean builder count.
-
-    builder_counts_by_region: dict {region_name: mean_count_over_runs}
-    """
-    ax.set_xlim(-180, 180)
-    ax.set_ylim(-65, 80)
-    ax.set_xticks([-180, -120, -60, 0, 60, 120, 180])
-    ax.set_yticks([-60, -30, 0, 30, 60])
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.grid(True, alpha=0.25, lw=0.5, ls=":")
-    ax.set_aspect("equal", adjustable="box")
-    ax.tick_params(left=False, bottom=False)
-
-    for side in ("top", "right", "bottom", "left"):
-        ax.spines[side].set_visible(True)
-        ax.spines[side].set_linewidth(0.8)
-        ax.spines[side].set_color("black")
-
-    for r_name in region_names:
-        if r_name not in region_coords:
-            continue
-        lat, lon = region_coords[r_name]
-        ax.scatter(lon, lat, s=8, c="#cccccc", zorder=2, edgecolors="none")
-
-    for r_name, count in builder_counts_by_region.items():
-        if count <= 0 or r_name not in region_coords:
-            continue
-        lat, lon = region_coords[r_name]
-        size = 30 + 80 * count
-        ax.scatter(lon, lat, s=size, c=ABR_COLOR, alpha=0.65,
-                   edgecolors="white", linewidths=0.6, zorder=3)
-
-    ax.set_title(title, fontsize=10)
-
-
-def _builder_counts(profiles, region_names):
-    """Aggregate a list of converged profiles into mean per-region builder counts."""
-    counts = {r: 0.0 for r in region_names}
-    n_profiles = len(profiles)
-    if n_profiles == 0:
-        return counts
-    for profile in profiles:
-        for r_idx in profile:
-            counts[region_names[r_idx]] += 1.0 / n_profiles
-    return counts
-
-
-def _set_ratio_axis(ax, x_vals):
-    major_ticks = [1.0, 2.0, 5.0, 10.0, 20.0]
-    major_labels = ["1x", "2x", "5x", "10x", "20x"]
-
-    ax.set_xscale("log")
-    ax.set_xticks(major_ticks)
-    ax.set_xticklabels(major_labels)
-    ax.set_xlim(min(x_vals) * 0.92, max(x_vals) * 1.08)
-    ax.set_xlabel("Expected per-source value ratio (high / low)")
-
-def plot(value_ratio_grid, abr_runs_by_ratio, planner_runs_by_ratio, K,
-         n_runs_per_ratio, region_names):
-    """abr_runs_by_ratio[ratio] = list of run dicts.
-    planner_runs_by_ratio[ratio] = list of planner dicts (one per instance)."""
-
-    def _abr_agg(key):
-        meds, los, his = [], [], []
-        for r in value_ratio_grid:
-            vals = [x[key] for x in abr_runs_by_ratio[r]]
-            m, lo, hi = _summarize(vals)
-            meds.append(m); los.append(lo); his.append(hi)
-        return np.array(meds), np.array(los), np.array(his)
-
-    def _plan_agg(key):
-        meds, los, his = [], [], []
-        for r in value_ratio_grid:
-            vals = [x[key] for x in planner_runs_by_ratio[r]]
-            m, lo, hi = _summarize(vals)
-            meds.append(m); los.append(lo); his.append(hi)
-        return np.array(meds), np.array(los), np.array(his)
-
-
-    wr_med, wr_lo, wr_hi = [], [], []
-    for ratio in value_ratio_grid:
-        w_opt_by_inst = {
-            p["instance_idx"]: p["w_opt"] for p in planner_runs_by_ratio[ratio]
-        }
-        ratios = []
-        for r in abr_runs_by_ratio[ratio]:
-            w_opt = w_opt_by_inst.get(r["instance_idx"])
-            if w_opt is not None and w_opt > 1e-12:
-                ratios.append(r["welfare"] / w_opt)
-        m, lo, hi = _summarize(ratios)
-        wr_med.append(m); wr_lo.append(lo); wr_hi.append(hi)
-    wr_med = np.array(wr_med); wr_lo = np.array(wr_lo); wr_hi = np.array(wr_hi)
-
-    welfare_med, welfare_lo, welfare_hi = _abr_agg("welfare")
-    welfare_opt_med, welfare_opt_lo, welfare_opt_hi = _plan_agg("w_opt")
-
-    geo_med, geo_lo, geo_hi = _abr_agg("geo_hhi")
-    util_med, util_lo, util_hi = _abr_agg("utility_hhi")
-    cov_hi_med, cov_hi_lo, cov_hi_hi = _abr_agg("cov_high")
-    cov_pe_med, cov_pe_lo, cov_pe_hi = _abr_agg("cov_peripheral")
-
-    geo_opt_med, geo_opt_lo, geo_opt_hi = _plan_agg("geo_hhi_opt")
-    cov_hi_opt_med, cov_hi_opt_lo, cov_hi_opt_hi = _plan_agg("cov_high_opt")
-    cov_pe_opt_med, cov_pe_opt_lo, cov_pe_opt_hi = _plan_agg("cov_peripheral_opt")
-
-    # Layout: top row 3 panels, middle row 3 panels, bottom row 2 maps.
-    fig = plt.figure(figsize=(14.5, 11))
-    gs = fig.add_gridspec(
-        nrows=3, ncols=6,
-        height_ratios=[1.0, 1.0, 1.05],
-        hspace=0.52, wspace=0.65,
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--load-results",
+        help="Load a saved exp1 .pkl/.json payload and replot without rerunning.",
     )
+    args = parser.parse_args(argv)
+    if args.load_results:
+        loaded = load_exp1_results(args.load_results)
+        meta = loaded.metadata
+        plot(
+            loaded.value_ratio_grid,
+            loaded.abr_runs_by_ratio,
+            loaded.planner_runs_by_ratio,
+            loaded.K,
+            loaded.n_runs_per_ratio,
+            region_names=loaded.region_names,
+            delta=meta.get("DELTA", DELTA),
+            n_instances=meta.get("N_INSTANCES", N_INSTANCES),
+            n_seeds_per_instance=meta.get("N_SEEDS_PER_INSTANCE", N_SEEDS_PER_INSTANCE),
+        )
+        return
 
-    # Row 1: panels A, B, C (cols 0-1, 2-3, 4-5)
-    ax_A = fig.add_subplot(gs[0, 0:2])
-    ax_B = fig.add_subplot(gs[0, 2:4])
-    ax_C = fig.add_subplot(gs[0, 4:6])
-    # Row 2: panels D, E, F (cols 0-1, 2-3, 4-5)
-    ax_D = fig.add_subplot(gs[1, 0:2])
-    ax_E = fig.add_subplot(gs[1, 2:4])
-    ax_F = fig.add_subplot(gs[1, 4:6])
-    # Row 3: world maps at smallest and largest ratio (cols 0-2, 3-5)
-    ax_M1 = fig.add_subplot(gs[2, 0:3])
-    ax_M2 = fig.add_subplot(gs[2, 3:6])
-
-    x = value_ratio_grid
-    x_idx = np.arange(len(value_ratio_grid))
-    band_label = "ABR IQR"
-    planner_band_label = "Planner IQR"
-    abr_marker_kwargs = dict(marker="o", ms=3.5, mec=ABR_COLOR, mfc=ABR_COLOR)
-    plan_marker_kwargs = dict(marker="s", ms=3.2, mec=PLAN_COLOR, mfc=PLAN_COLOR)
-
-    # Panel A: welfare (bar chart)
-    ax = ax_A
-    width = 0.36
-    ax.bar(
-        x_idx - width / 2, welfare_med, width=width, color=ABR_COLOR, alpha=0.75,
-        label="ABR median",
-        yerr=np.vstack([welfare_med - welfare_lo, welfare_hi - welfare_med]),
-        error_kw=dict(ecolor=ABR_COLOR, elinewidth=1.0, capsize=2),
-    )
-    ax.bar(
-        x_idx + width / 2, welfare_opt_med, width=width, color=PLAN_COLOR, alpha=0.55,
-        label="Planner median",
-        yerr=np.vstack([welfare_opt_med - welfare_opt_lo, welfare_opt_hi - welfare_opt_med]),
-        error_kw=dict(ecolor=PLAN_COLOR, elinewidth=1.0, capsize=2),
-    )
-    bar_tick_positions = [
-        i for i, r in enumerate(value_ratio_grid)
-        if r in {1.0, 2.0, 5.0, 10.0, 20.0}
-    ]
-    bar_tick_labels = [
-        _format_ratio_label(value_ratio_grid[i]) for i in bar_tick_positions
-    ]
-    ax.set_xticks(bar_tick_positions)
-    ax.set_xticklabels(bar_tick_labels)
-    ax.set_xlabel("Expected per-source value ratio (high / low)")
-    ax.set_ylabel("Expected welfare")
-    ax.set_title("(A) Welfare")
-    ax.legend(fontsize=8)
-    ax.grid(axis="y", alpha=0.2)
-
-    # Panel B: welfare ratio
-    ax = ax_B
-    ax.plot(x, wr_med, "-", color=ABR_COLOR, lw=1.5, label="ABR median", **abr_marker_kwargs)
-    ax.fill_between(x, wr_lo, wr_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.axhline(0.5, ls="--", color="gray", lw=1.0, label="PoA floor = 0.5")
-    ax.axhline(1.0, ls=":", color="black", lw=0.8, alpha=0.6)
-    _set_ratio_axis(ax, x)
-    ax.set_ylabel(r"$W_{\rm ABR}\,/\,W^*$")
-    ax.set_ylim(0.45, 1.05)
-    ax.set_title("(B) Welfare ratio")
-    ax.legend(fontsize=8, loc="lower left")
-
-    # Panel C: geographic HHI
-    ax = ax_C
-    ax.plot(x, geo_med, "-", color=ABR_COLOR, lw=1.5, label="ABR median", **abr_marker_kwargs)
-    ax.fill_between(x, geo_lo, geo_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, geo_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median",
-            **plan_marker_kwargs)
-    ax.fill_between(x, geo_opt_lo, geo_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    ax.axhline(1 / K, ls=":", color="black", lw=1.0, alpha=0.6,
-               label=rf"Floor $1/K = {1/K:.3f}$")
-    _set_ratio_axis(ax, x)
-    ax.set_ylabel("Geographic HHI")
-    ax.set_title("(C) Geographic HHI")
-    ax.legend(fontsize=8)
-
-    # Panel D: utility HHI
-    ax = ax_D
-    ax.plot(x, util_med, "-", color=ABR_COLOR, lw=1.5, label="ABR median", **abr_marker_kwargs)
-    ax.fill_between(x, util_lo, util_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.axhline(9 / (8 * K), ls="--", color="gray", lw=1.0,
-               label=rf"NE ceiling $9/(8K)$")
-    ax.axhline(1 / K, ls=":", color="black", lw=1.0, alpha=0.6,
-               label=rf"Egalitarian $1/K$")
-    ax.set_ylim(1 / K - 0.005, 9 / (8 * K) + 0.005)
-    _set_ratio_axis(ax, x)
-    ax.set_ylabel("Utility HHI")
-    ax.set_title("(D) Utility HHI")
-    ax.legend(fontsize=8)
-
-    # Panel E: high-value cluster coverage
-    ax = ax_E
-    ax.plot(x, cov_hi_med, "-", color=ABR_COLOR, lw=1.5, label="ABR median", **abr_marker_kwargs)
-    ax.fill_between(x, cov_hi_lo, cov_hi_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, cov_hi_opt_med, "-.", color=PLAN_COLOR, lw=1.5, label="Planner median",
-            **plan_marker_kwargs)
-    ax.fill_between(x, cov_hi_opt_lo, cov_hi_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    _set_ratio_axis(ax, x)
-    ax.set_ylabel("Coverage fraction")
-    ax.set_ylim(-0.05, 1.05)
-    ax.set_title("(E) High-value cluster coverage")
-    ax.legend(fontsize=8, loc="lower right")
-
-    # Panel F: peripheral cluster coverage
-    ax = ax_F
-    ax.plot(x, cov_pe_med, "-", color=ABR_COLOR, lw=1.5, label="ABR median", **abr_marker_kwargs)
-    ax.fill_between(x, cov_pe_lo, cov_pe_hi, color=ABR_COLOR, alpha=0.18, label=band_label)
-    ax.plot(x, cov_pe_opt_med, "-.", color=PLAN_COLOR, lw=1.5,
-            label="Planner median", **plan_marker_kwargs)
-    ax.fill_between(x, cov_pe_opt_lo, cov_pe_opt_hi, color=PLAN_COLOR, alpha=0.14,
-                    label=planner_band_label)
-    _set_ratio_axis(ax, x)
-    ax.set_ylabel("Coverage fraction")
-    ax.set_ylim(-0.05, 1.05)
-    ax.set_title("(F) Peripheral cluster coverage")
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0)
-
-    # Bottom row: world maps at smallest and largest ratio with data
-    ratios_with_data = [r for r in value_ratio_grid if abr_runs_by_ratio.get(r)]
-    if len(ratios_with_data) >= 2:
-        map_ratios = [ratios_with_data[0], ratios_with_data[-1]]
-    elif len(ratios_with_data) == 1:
-        map_ratios = [ratios_with_data[0], ratios_with_data[0]]
-    else:
-        map_ratios = []
-
-    for ax_map, ratio in zip([ax_M1, ax_M2], map_ratios):
-        profiles = [r["final_profile"] for r in abr_runs_by_ratio.get(ratio, [])]
-        counts = _builder_counts(profiles, region_names)
-        _plot_world_map(ax_map, counts, region_names, K,
-                        title=rf"high/low value ratio = {ratio:g}x  (mean ABR placement)")
-
-    fig.suptitle(
-        rf"Experiment 1: Value asymmetry sweep "
-        rf"($K={K}$, $\Delta={int(DELTA*1000)}\,\mathrm{{ms}}$, "
-        rf"{N_INSTANCES} source instances $\times$ {N_SEEDS_PER_INSTANCE} inits)",
-        fontsize=12, y=0.995,
-    )
-    out = FIGURES_DIR / "exp1_value_asymmetry.pdf"
-    fig.savefig(out, bbox_inches="tight")
-    fig.savefig(str(out).replace(".pdf", ".png"), dpi=180, bbox_inches="tight")
-    print(f"Saved {out}")
-
-def main():
+    _load_runtime_deps()
     regions, _, _ = load_propagation_model(REGIONS_EXP1)
     n_regions = len(regions)
 
@@ -640,8 +413,17 @@ def main():
         opt_method=opt_method,
     )
 
-    plot(VALUE_RATIO_GRID, abr_runs_by_ratio, planner_runs_by_ratio, K,
-         n_runs_per_ratio, region_names=regions)
+    plot(
+        VALUE_RATIO_GRID,
+        abr_runs_by_ratio,
+        planner_runs_by_ratio,
+        K,
+        n_runs_per_ratio,
+        region_names=regions,
+        delta=DELTA,
+        n_instances=N_INSTANCES,
+        n_seeds_per_instance=N_SEEDS_PER_INSTANCE,
+    )
 
 
 if __name__ == "__main__":

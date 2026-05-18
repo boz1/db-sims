@@ -47,8 +47,12 @@ def _compute_welfare_lognormal(
         log1mq = log_ndtr(-z)  # log(1 - phi(z)) = log(phi(-z))
 
         # log_no_coverage[t] = sum_r counts[r] * log(1 - q[r,t])
-        log_no_cov = counts @ log1mq  # (T,)
-        f_bar = float(np.mean(1.0 - np.exp(log_no_cov)))
+        active_mask = counts > 0
+        if active_mask.any():
+            log_no_cov = counts[active_mask] @ log1mq[active_mask]  # (T,)
+            f_bar = float(np.mean(1.0 - np.exp(log_no_cov)))
+        else:
+            f_bar = 0.0
         welfare += weight * f_bar
 
     return welfare

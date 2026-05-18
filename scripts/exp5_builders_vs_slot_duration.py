@@ -33,6 +33,8 @@ from scripts.exp_helpers import (
     compute_opt_sliced,
     run_abr_full,
     max_mean_pairwise_distance_km,
+    placement_emd_km,
+    placement_multiset_jaccard,
 )
 
 REGIONS_EXP = list(REGIONS_DEFAULT) + ["europe-west2", "asia-northeast2", "asia-south2", "us-west2"]
@@ -221,14 +223,19 @@ def _build_grids(abr_runs, planner_runs, d_max_by_K):
     """Return dict {metric_name: (N_K, N_DELTA) array of medians}.
 
     HHI variants:
-      - geo_hhi: raw, floor 1/K, max 1
-      - geo_hhi_norm: (HHI - 1/K) / (1 - 1/K)
-      - utility_hhi: raw, floor 1/K, NE ceiling 9/(8K)
-      - utility_hhi_norm: (HHI - 1/K) / (9/(8K) - 1/K)
+      - geo_hhi, geo_hhi_norm
+      - utility_hhi, utility_hhi_norm
 
     Pairwise distance:
-      - mean_pairwise_km: raw (km)
-      - mean_pairwise_km_norm: raw / D_max(K), in [0, 1]
+      - mean_pairwise_km, mean_pairwise_km_norm
+
+    Planner comparison metrics (computed here from cached profiles):
+      - placement_emd_km: avg km a builder would need to move to match planner
+      - placement_emd_norm: emd_km / D_max(K), in [0, 1]
+      - placement_jaccard: multiset Jaccard between ABR and planner placements
+
+    Coverage metrics (kept in dict but not plotted):
+      - cov_high, cov_peripheral
     """
     abr_by_cell = {}
     for r in abr_runs:
@@ -244,6 +251,8 @@ def _build_grids(abr_runs, planner_runs, d_max_by_K):
                "geo_hhi", "geo_hhi_norm",
                "utility_hhi", "utility_hhi_norm",
                "mean_pairwise_km", "mean_pairwise_km_norm",
+               "placement_emd_km", "placement_emd_norm",
+               "placement_jaccard",
                "cov_high", "cov_peripheral"]
     grids = {m: np.full((N_K, N_DELTA), np.nan) for m in metrics}
 
@@ -255,14 +264,38 @@ def _build_grids(abr_runs, planner_runs, d_max_by_K):
 
         planners = planner_by_cell.get((ki, di), [])
         w_opt_by_inst = {p["instance_idx"]: p["w_opt"] for p in planners}
+        opt_profile_by_inst = {p["instance_idx"]: p["opt_profile"]
+                                for p in planners}
 
         ratios_list = []
+        emd_km_list = []
+        jaccard_list = []
         for r in runs:
-            w_opt = w_opt_by_inst.get(r["instance_idx"])
+            inst = r["instance_idx"]
+            w_opt = w_opt_by_inst.get(inst)
             if w_opt is not None and w_opt > 1e-12:
                 ratios_list.append(r["welfare"] / w_opt)
+
+            opt_profile = opt_profile_by_inst.get(inst)
+            if opt_profile is not None and "final_profile" in r:
+                emd_km = placement_emd_km(
+                    r["final_profile"], opt_profile, REGIONS_EXP,
+                )
+                jaccard = placement_multiset_jaccard(
+                    r["final_profile"], opt_profile,
+                )
+                emd_km_list.append(emd_km)
+                jaccard_list.append(jaccard)
+
         if ratios_list:
             grids["welfare_ratio"][ki, di] = float(np.median(ratios_list))
+        if emd_km_list:
+            emd_med = float(np.median(emd_km_list))
+            grids["placement_emd_km"][ki, di] = emd_med
+            grids["placement_emd_norm"][ki, di] = emd_med / d_max \
+                if d_max > 1e-12 else 0.0
+        if jaccard_list:
+            grids["placement_jaccard"][ki, di] = float(np.median(jaccard_list))
 
         geo_vals = [r["geo_hhi"] for r in runs if "geo_hhi" in r]
         if geo_vals:
@@ -297,11 +330,7 @@ def _build_grids(abr_runs, planner_runs, d_max_by_K):
 
 def _plot_heatmap(ax, grid_color, grid_labels, title, cbar_label,
                   vmin=None, vmax=None, cmap="viridis", label_fmt="{:.2f}"):
-    """Plot one (N_K, N_DELTA) heatmap.
-
-    grid_color: array used for the colormap
-    grid_labels: array used for in-cell text labels (None to skip labels)
-    """
+    """Plot one (N_K, N_DELTA) heatmap."""
     im = ax.imshow(
         grid_color,
         aspect="auto",
@@ -389,16 +418,20 @@ def plot_heatmaps(grids):
 
     _plot_heatmap(
         axes[1, 1],
-        grids["cov_high"], grids["cov_high"],
-        "(E) High-value cluster coverage",
-        "fraction", vmin=0.0, vmax=1.0, cmap="viridis",
+        grids["placement_emd_norm"], grids["placement_emd_norm"],
+        "(E) Placement EMD vs planner (normalised by $D_{\\max}(K)$)",
+        "$\\mathrm{EMD}\\,/\\,D_{\\max}(K)$",
+        vmin=0.0, vmax=1.0, cmap="inferno",
+        label_fmt="{:.2f}",
     )
 
     _plot_heatmap(
         axes[1, 2],
-        grids["cov_peripheral"], grids["cov_peripheral"],
-        "(F) Peripheral cluster coverage",
-        "fraction", vmin=0.0, vmax=1.0, cmap="viridis",
+        grids["placement_jaccard"], grids["placement_jaccard"],
+        "(F) Placement Jaccard (multiset) vs planner",
+        "Jaccard similarity",
+        vmin=0.0, vmax=1.0, cmap="viridis",
+        label_fmt="{:.2f}",
     )
 
     fig.suptitle(

@@ -18,6 +18,7 @@ from sim.simulator import (
 from analysis.poa import optimal_welfare_brute_force, optimal_welfare_greedy, _compute_welfare_analytical
 from functools import lru_cache
 from itertools import combinations
+from scipy.optimize import linear_sum_assignment
 
 _D_MAX_DISK_CACHE_PATH = Path(__file__).resolve().parent.parent / "results" / "d_max_cache.npz"
 
@@ -338,6 +339,48 @@ def _max_mean_pairwise_distance_km_cached(K: int, region_names: tuple) -> float:
         if mean > best:
             best = mean
     return best
+
+def placement_emd_km(profile_a: list, profile_b: list, region_names: list,
+                      coords: dict = GCP_REGION_COORDS) -> float:
+    """Earth Mover's Distance between two builder placements, in km per
+    builder
+ 
+    Finds the assignment of builders in profile_a to builders in profile_b
+    that minimises total great-circle distance, using the Hungarian
+    algorithm. Returns sum of distances along the optimal matching, divided
+    by K.
+ 
+    Both profiles must have the same length K. Order within each profile
+    doesn't matter
+    """
+    K = len(profile_a)
+    if K == 0 or K != len(profile_b):
+        return 0.0
+    cost = np.zeros((K, K))
+    for i in range(K):
+        ri = region_names[profile_a[i]]
+        for j in range(K):
+            rj = region_names[profile_b[j]]
+            cost[i, j] = great_circle_km(ri, rj, coords)
+    row_ind, col_ind = linear_sum_assignment(cost)
+    return float(cost[row_ind, col_ind].sum()) / K
+ 
+ 
+def placement_multiset_jaccard(profile_a: list, profile_b: list) -> float:
+    """Multiset Jaccard similarity between two builder placements.
+ 
+    For each region, take the min/max occupancy across the two profiles.
+    Returns sum(min) / sum(max), in [0, 1]
+    """
+    from collections import Counter
+    if len(profile_a) == 0 or len(profile_b) == 0:
+        return 0.0
+    ca, cb = Counter(profile_a), Counter(profile_b)
+    regions = set(ca) | set(cb)
+    inter = sum(min(ca.get(r, 0), cb.get(r, 0)) for r in regions)
+    union = sum(max(ca.get(r, 0), cb.get(r, 0)) for r in regions)
+    return inter / union if union > 0 else 0.0
+ 
 
 def geo_hhi(profile: list, n_regions: int) -> float:
     """Geographic HHI: sum of squared region-occupancy fractions."""

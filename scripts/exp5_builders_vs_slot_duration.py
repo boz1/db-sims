@@ -362,29 +362,29 @@ def plot_heatmaps(grids):
 
     _plot_heatmap(
         axes[0, 1],
-        grids["geo_hhi_norm"], grids["geo_hhi"],
-        "(B) Geographic HHI (normalised, label = raw)",
+        grids["geo_hhi_norm"], grids["geo_hhi_norm"],
+        "(B) Geographic HHI (normalised)",
         "$(\\mathrm{HHI} - 1/K) / (1 - 1/K)$",
         vmin=0.0, vmax=1.0, cmap="magma",
-        label_fmt="{:.3f}",
+        label_fmt="{:.2f}",
     )
 
     _plot_heatmap(
         axes[0, 2],
-        grids["utility_hhi_norm"], grids["utility_hhi"],
-        "(C) Utility HHI (normalised, label = raw)",
+        grids["utility_hhi_norm"], grids["utility_hhi_norm"],
+        "(C) Utility HHI (normalised)",
         "$(\\mathrm{HHI} - 1/K) / (9/(8K) - 1/K)$",
         vmin=0.0, vmax=1.0, cmap="magma",
-        label_fmt="{:.3f}",
+        label_fmt="{:.2f}",
     )
 
     _plot_heatmap(
         axes[1, 0],
-        grids["mean_pairwise_km_norm"], grids["mean_pairwise_km"],
-        "(D) Mean pairwise distance (normalised by $D_{\\max}(K)$, label = raw km)",
+        grids["mean_pairwise_km_norm"], grids["mean_pairwise_km_norm"],
+        "(D) Mean pairwise distance (normalised by $D_{\\max}(K)$)",
         "$D_{\\rm ABR}\\,/\\,D_{\\max}(K)$",
         vmin=0.0, vmax=1.0, cmap="cividis",
-        label_fmt="{:.0f}",
+        label_fmt="{:.2f}",
     )
 
     _plot_heatmap(

@@ -51,7 +51,7 @@ TOTAL_VALUE = 10.0
 
 VALUE_RATIO_GRID = np.array([1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 5.0, 10.0, 20.0])
 
-N_INSTANCES = 3  # random source-layout instances per ratio
+N_INSTANCES = 5  # random source-layout instances per ratio
 N_SEEDS_PER_INSTANCE = 3   # random ABR initialisations per instance
 N_T = 100
 N_T_FINAL = 200
@@ -94,7 +94,7 @@ PERIPHERAL_POOL = [
     "us-west1", "us-west2",
 ]
 
-OPT_METHOD = "greedy"
+OPT_METHOD = "brute"
 BRUTE_FORCE_MAX_PROFILES = 10_000_000  # used only if OPT_METHOD == "auto"
 
 plt.rcParams.update({

@@ -96,7 +96,7 @@ def alpha_from_value_ratio(ratio, n_high=N_HIGH, n_peri=N_PERI):
 
 ALPHA = alpha_from_value_ratio(VALUE_RATIO)
 
-OPT_METHOD = "greedy"
+OPT_METHOD = "brute"
 BRUTE_FORCE_MAX_PROFILES = 10_000_000  # used only if OPT_METHOD == "auto"
 
 plt.rcParams.update({
